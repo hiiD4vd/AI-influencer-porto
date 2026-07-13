@@ -72,10 +72,10 @@ const GRID_OPTIONS: Partial<InfiniteGridOptions> = {
   gridRows: 4,
   tileSize: 2.4,
   gridGap: 0.06,
-  baseCameraZ: 11.2, // camera slightly moved back
+  baseCameraZ: 9.5,
   enablePostProcessing: true,
   postProcessParams: {
-    distortionIntensity: -0.18,
+    distortionIntensity: -0.28,
     vignetteOffset: 0.0,
     vignetteDarkness: 0.55,
   },

@@ -77,7 +77,7 @@ export class InfiniteGridClass {
     this.container.appendChild(this.gl.canvas)
     this.renderer.setSize(W, H)
 
-    this.camera = new Camera(this.gl, { fov: 38, near: 0.1, far: 200 })
+    this.camera = new Camera(this.gl, { fov: 48, near: 0.1, far: 200 })
     this.camera.position.z = this.options.baseCameraZ
     this.camera.perspective({ aspect: W / H })
 
