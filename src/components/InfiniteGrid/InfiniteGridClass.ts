@@ -245,8 +245,6 @@ export class InfiniteGridClass {
     // Dim other cards slightly
     meshes.forEach(m => {
       const key = (m as any)._tileKey
-      const opacityTarget = newKey ? (key === newKey ? 1.0 : 0.4) : 1.0
-      gsap.to(m.program.uniforms.map.value, { /* could do something here if we had uniform, but we rely on fg/bg */ })
       // For real dimming, we could fade the fgMesh. Let's add uOpacity to fgMesh if needed, or rely on the background effect for contrast.
     })
 
