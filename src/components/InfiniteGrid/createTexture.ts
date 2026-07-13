@@ -181,8 +181,8 @@ export function createForegroundTexture(
     }
 
     // ── 4-Corner Metadata (Phantom.land style) ──
-    ctx.font = `600 10px ${FONT_BASE}`
-    ctx.fillStyle = 'rgba(255,255,255,0.5)'
+    ctx.font = `600 16px ${FONT_BASE}`
+    ctx.fillStyle = 'rgba(255,255,255,0.95)' // Much brighter for visibility
     
     // Support modern canvas letterSpacing for that premium editorial look
     if ('letterSpacing' in ctx) {
@@ -192,21 +192,21 @@ export function createForegroundTexture(
     // 1. Top-Left: Title
     ctx.textAlign = 'left'
     ctx.textBaseline = 'top'
-    ctx.fillText(card.title.toUpperCase(), PAD + 4, PAD + TEXT_PAD)
+    ctx.fillText(card.title.toUpperCase(), PAD + 8, PAD + TEXT_PAD)
 
     // 2. Top-Right: Brand/Badge
     ctx.textAlign = 'right'
-    ctx.fillText(card.badge.toUpperCase(), w - PAD - 4, PAD + TEXT_PAD)
+    ctx.fillText(card.badge.toUpperCase(), w - PAD - 8, PAD + TEXT_PAD)
 
     // 3. Bottom-Left: Tags
     ctx.textAlign = 'left'
     ctx.textBaseline = 'bottom'
     const tagsText = card.tags.join('   ·   ').toUpperCase()
-    ctx.fillText(tagsText, PAD + 4, h - PAD - TEXT_PAD)
+    ctx.fillText(tagsText, PAD + 8, h - PAD - TEXT_PAD)
 
     // 4. Bottom-Right: Date
     ctx.textAlign = 'right'
-    ctx.fillText(card.date, w - PAD - 4, h - PAD - TEXT_PAD)
+    ctx.fillText(card.date, w - PAD - 8, h - PAD - TEXT_PAD)
 
     // Reset letterSpacing
     if ('letterSpacing' in ctx) {

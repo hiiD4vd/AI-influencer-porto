@@ -68,14 +68,14 @@ const CARD_DATA: CardData[] = [
 ]
 
 const GRID_OPTIONS: Partial<InfiniteGridOptions> = {
-  gridCols: 4,
-  gridRows: 4,
+  gridCols: 5,
+  gridRows: 5,
   tileSize: 2.4,
   gridGap: 0.06,
-  baseCameraZ: 9.5,
+  baseCameraZ: 13.5, // Straightforward pull back to see more grid items
   enablePostProcessing: true,
   postProcessParams: {
-    distortionIntensity: -0.28,
+    distortionIntensity: -0.15, // Reverted to subtle concavity
     vignetteOffset: 0.0,
     vignetteDarkness: 0.55,
   },
