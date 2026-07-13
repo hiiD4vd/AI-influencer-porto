@@ -31,6 +31,7 @@ onMounted(() => {
   if (!containerRef.value) return
   grid = new InfiniteGridClass(containerRef.value, props.cardData, props.options)
   grid.onTileClicked = (card, index) => emit('tileClicked', { card, index })
+  grid.onTileLoaded = () => emit('onTileLoaded')
 })
 
 onUnmounted(() => {

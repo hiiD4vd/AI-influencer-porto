@@ -1,4 +1,4 @@
-// Vertex shader for grid tiles with 3D parabolic displacement
+// Vertex shader for grid tiles
 export const tileVertex = /* glsl */`
   attribute vec3 position;
   attribute vec2 uv;
@@ -8,40 +8,49 @@ export const tileVertex = /* glsl */`
 
   void main() {
     vUv = uv;
-    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-    
-    // Parabolic dome distortion: 
-    // pushes vertices away along the Z axis the further they are from screen center.
-    // This perfectly replicates the phantom.land curved screen effect without 2D fish-eye artifacts.
-    float distSq = (mvPosition.x * mvPosition.x) + (mvPosition.y * mvPosition.y) * 0.5;
-    mvPosition.z -= distSq * 0.08; 
-
-    gl_Position = projectionMatrix * mvPosition;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `
 
-// Foreground tile: transparent bg, image + text sit on top
+/**
+ * Foreground tile shader.
+ * On hover, the dark card background lerps toward uHoverColor (the
+ * per-image dominant color), exactly replicating the phantom.land effect.
+ * map.a = 1 means a painted pixel (image/text), 0 means empty card background.
+ */
 export const tileFrag = /* glsl */`
   precision highp float;
   uniform sampler2D map;
+  uniform vec3 uHoverColor;
+  uniform float uHoverProgress; // 0 = idle, 1 = fully hovered
   varying vec2 vUv;
 
   void main() {
     vec4 px = texture2D(map, vUv);
-    gl_FragColor = px;
+
+    // Base card — near-black
+    vec3 baseBg = vec3(0.055); // #0e0e0e
+
+    // Lerp toward the card's extracted dark-moody color on hover.
+    // Cap at 0.82 so there's always a dark undertone — never fully saturated.
+    vec3 hoveredBg = mix(baseBg, uHoverColor, uHoverProgress * 0.82);
+
+    // Painted pixels (image / text / tags) sit on top of the background
+    vec3 finalColor = mix(hoveredBg, px.rgb, px.a);
+
+    gl_FragColor = vec4(finalColor, 1.0);
   }
 `
 
-// Background tile: blurred image, fades in on hover
+// Legacy — kept for compatibility, no longer used
 export const backgroundFrag = /* glsl */`
   precision highp float;
   uniform sampler2D map;
   uniform float uOpacity;
   varying vec2 vUv;
-
   void main() {
     vec4 color = texture2D(map, vUv);
-    gl_FragColor = vec4(color.rgb, uOpacity);
+    gl_FragColor = vec4(color.rgb, color.a * uOpacity);
   }
 `
 
@@ -57,7 +66,7 @@ export const postVertex = /* glsl */`
   }
 `
 
-// Post-processing: barrel distortion + vignette
+// Post-processing fragment: barrel distortion + vignette
 export const postFrag = /* glsl */`
   precision highp float;
   uniform sampler2D tMap;
@@ -70,22 +79,22 @@ export const postFrag = /* glsl */`
   vec2 barrelDistort(vec2 uv, float k) {
     vec2 p = uv * 2.0 - 1.0;
     float r2 = dot(p, p);
-    p *= 1.0 + k * r2 + k * k * r2 * r2 * 0.4;
+    p *= 1.0 + k * r2 + k * k * r2 * r2 * 0.3;
     return (p + 1.0) * 0.5;
   }
 
   void main() {
     vec2 uv = barrelDistort(vUv, uDistortion);
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
-      gl_FragColor = vec4(0.031, 0.031, 0.031, 1.0);
+      gl_FragColor = vec4(0.04, 0.04, 0.04, 1.0);
       return;
     }
     vec4 color = texture2D(tMap, uv);
 
-    // Vignette
+    // Smooth vignette
     vec2 pos = vUv - 0.5;
     float d = dot(pos, pos) * 4.0;
-    float vig = smoothstep(0.75, uVignetteOffset + 0.1, d);
+    float vig = smoothstep(0.8, uVignetteOffset + 0.1, d);
     color.rgb *= 1.0 - (1.0 - vig) * uVignetteDarkness;
 
     gl_FragColor = color;
