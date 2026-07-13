@@ -146,22 +146,24 @@ export function createForegroundTexture(
   let dominantColor: [number, number, number] = [0.06, 0.06, 0.06]
 
   const PAD = 16
-  const imageY = 40
-  const imageH = h * 0.73 // 73% of height
+  const TEXT_PAD = 14
+  // Maximize image area (leave just enough room for top/bottom text)
+  const imageY = PAD + 32
+  const imageH = h - (PAD * 2) - 64
 
   function paintUI(img?: HTMLImageElement) {
     ctx.clearRect(0, 0, w, h)
 
     // Border on transparent background
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)' // Softer border
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)'
     ctx.lineWidth = 1
     ctx.strokeRect(0.5, 0.5, w - 1, h - 1)
 
-    // ── Image ──
     if (img) {
+      // ── Image ──
       ctx.save()
       ctx.beginPath()
-      rr(ctx, PAD, imageY, w - PAD * 2, imageH, 4) // Smaller border radius
+      rr(ctx, PAD, imageY, w - PAD * 2, imageH, 4)
       ctx.clip()
       const ar = img.width / img.height
       const tar = (w - PAD * 2) / imageH
@@ -171,46 +173,44 @@ export function createForegroundTexture(
       ctx.drawImage(img, sx, sy, sw, sh, PAD, imageY, w - PAD * 2, imageH)
       ctx.restore()
     } else {
-      ctx.fillStyle = 'rgba(255,255,255,0.03)'
+      // placeholder shimmer (opaque dark so it's visible)
+      ctx.fillStyle = 'rgba(255,255,255,0.02)'
       ctx.save(); ctx.beginPath()
       rr(ctx, PAD, imageY, w - PAD * 2, imageH, 4)
       ctx.fill(); ctx.restore()
     }
 
-    // ── Top Left: Date ──
-    ctx.fillStyle = 'rgba(255,255,255,0.4)'
-    ctx.font = `500 10px ${FONT_BASE}`
-    ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-    ctx.fillText(card.date, PAD, 20)
+    // ── 4-Corner Metadata (Phantom.land style) ──
+    ctx.font = `600 10px ${FONT_BASE}`
+    ctx.fillStyle = 'rgba(255,255,255,0.5)'
+    
+    // Support modern canvas letterSpacing for that premium editorial look
+    if ('letterSpacing' in ctx) {
+      ;(ctx as any).letterSpacing = '1px'
+    }
 
-    // ── Top Right: Client ──
-    ctx.fillStyle = 'rgba(255,255,255,0.7)'
-    ctx.font = `500 11px ${FONT_BASE}`
-    ctx.textAlign = 'right'; ctx.textBaseline = 'middle'
-    ctx.fillText(card.client, w - PAD, 20)
+    // 1. Top-Left: Title
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'top'
+    ctx.fillText(card.title.toUpperCase(), PAD + 4, PAD + TEXT_PAD)
 
-    // ── Bottom Area ──
-    const bottomY = imageY + imageH + 20
+    // 2. Top-Right: Brand/Badge
+    ctx.textAlign = 'right'
+    ctx.fillText(card.badge.toUpperCase(), w - PAD - 4, PAD + TEXT_PAD)
 
-    // Niche (Category)
-    ctx.fillStyle = 'rgba(255,255,255,0.4)'
-    ctx.font = `600 8.5px ${FONT_BASE}`
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top'
-    ctx.fillText(card.niche, PAD, bottomY)
+    // 3. Bottom-Left: Tags
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'bottom'
+    const tagsText = card.tags.join('   ·   ').toUpperCase()
+    ctx.fillText(tagsText, PAD + 4, h - PAD - TEXT_PAD)
 
-    // Title (Editorial size)
-    ctx.fillStyle = '#fff'
-    ctx.font = `600 15px ${FONT_DISPLAY}`
-    ctx.textAlign = 'left'; ctx.textBaseline = 'top'
-    ctx.fillText(card.title, PAD, bottomY + 16)
+    // 4. Bottom-Right: Date
+    ctx.textAlign = 'right'
+    ctx.fillText(card.date, w - PAD - 4, h - PAD - TEXT_PAD)
 
-    // Tags (Horizontal text with separator)
-    if (card.tags.length > 0) {
-      ctx.fillStyle = 'rgba(255,255,255,0.3)'
-      ctx.font = `500 9px ${FONT_BASE}`
-      ctx.textAlign = 'right'; ctx.textBaseline = 'top'
-      const tagText = card.tags.join(' · ')
-      ctx.fillText(tagText.toUpperCase(), w - PAD, bottomY + 16)
+    // Reset letterSpacing
+    if ('letterSpacing' in ctx) {
+      ;(ctx as any).letterSpacing = '0px'
     }
 
     tex.image = cvs

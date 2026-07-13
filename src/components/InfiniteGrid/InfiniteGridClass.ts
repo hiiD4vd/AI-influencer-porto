@@ -77,8 +77,7 @@ export class InfiniteGridClass {
     this.container.appendChild(this.gl.canvas)
     this.renderer.setSize(W, H)
 
-    // Wider FOV for more dramatic perspective distortion
-    this.camera = new Camera(this.gl, { fov: 55, near: 0.1, far: 200 })
+    this.camera = new Camera(this.gl, { fov: 38, near: 0.1, far: 200 })
     this.camera.position.z = this.options.baseCameraZ
     this.camera.perspective({ aspect: W / H })
 
@@ -138,11 +137,8 @@ export class InfiniteGridClass {
 
         for (let r = 0; r < this.options.gridRows; r++) {
           for (let c = 0; c < this.options.gridCols; c++) {
-            // Stagger Y position by column to create a masonry feel
-            // while keeping the exact same total column height for perfect wrapping
-            const staggerY = (c % 3) * (this.SPACE * 0.33)
             const x = startX + c * this.SPACE
-            const y = startY - r * this.SPACE + staggerY
+            const y = startY - r * this.SPACE
             const localIdx = r * this.options.gridCols + c
             const tileKey = `${idx}-${localIdx}`
             const cardIdx = (idx * this.options.gridCols * this.options.gridRows + localIdx) % this.cardData.length
@@ -213,21 +209,23 @@ export class InfiniteGridClass {
 
     if (newKey === this.currentHoverKey) return
 
-    // Fade out and scale down old tile
+    // Fade out old tile
     if (this.currentHoverKey) {
       const m = this.fgMeshMap.get(this.currentHoverKey)
-      if (m) {
-        gsap.to(m.program.uniforms.uHoverProgress, { value: 0, duration: 0.4, ease: 'power2.out' })
-        gsap.to(m.scale, { x: 1, y: 1, z: 1, duration: 0.4, ease: 'power2.out' })
-      }
+      if (m) gsap.to(m.program.uniforms.uHoverProgress, {
+        value: 0,
+        duration: 0.4,
+        ease: 'power2.out',
+      })
     }
-    // Fade in and scale up new tile
+    // Fade in new tile
     if (newKey) {
       const m = this.fgMeshMap.get(newKey)
-      if (m) {
-        gsap.to(m.program.uniforms.uHoverProgress, { value: 1, duration: 0.35, ease: 'power2.out' })
-        gsap.to(m.scale, { x: 1.03, y: 1.03, z: 1.03, duration: 0.35, ease: 'power2.out' })
-      }
+      if (m) gsap.to(m.program.uniforms.uHoverProgress, {
+        value: 1,
+        duration: 0.35,
+        ease: 'power2.out',
+      })
     }
 
     this.currentHoverKey = newKey
@@ -303,10 +301,7 @@ export class InfiniteGridClass {
 
     if (this.currentHoverKey) {
       const m = this.fgMeshMap.get(this.currentHoverKey)
-      if (m) {
-        gsap.to(m.program.uniforms.uHoverProgress, { value: 0, duration: 0.4, ease: 'power2.out' })
-        gsap.to(m.scale, { x: 1, y: 1, z: 1, duration: 0.4, ease: 'power2.out' })
-      }
+      if (m) gsap.to(m.program.uniforms.uHoverProgress, { value: 0, duration: 0.4, ease: 'power2.out' })
       this.currentHoverKey = ''
     }
   }
@@ -314,10 +309,7 @@ export class InfiniteGridClass {
   private onLeave() {
     if (this.currentHoverKey) {
       const m = this.fgMeshMap.get(this.currentHoverKey)
-      if (m) {
-        gsap.to(m.program.uniforms.uHoverProgress, { value: 0, duration: 0.4, ease: 'power2.out' })
-        gsap.to(m.scale, { x: 1, y: 1, z: 1, duration: 0.4, ease: 'power2.out' })
-      }
+      if (m) gsap.to(m.program.uniforms.uHoverProgress, { value: 0, duration: 0.4, ease: 'power2.out' })
       this.currentHoverKey = ''
     }
     this.container.style.cursor = 'grab'

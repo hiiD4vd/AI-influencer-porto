@@ -1,8 +1,6 @@
 export interface CardData {
   title: string
-  badge?: string
-  client: string
-  niche: string
+  badge: string
   description?: string
   tags: string[]
   date: string

@@ -49,35 +49,35 @@ import type { CardData, InfiniteGridOptions } from '../components/InfiniteGrid/t
 const activeTile = ref<CardData | null>(null)
 
 const CARD_DATA: CardData[] = [
-  { title: 'AI Influencer Platform', client: 'Google', niche: 'AI / PLATFORM', tags: ['Machine Learning', 'Web3'], date: '2025', image: 'https://picsum.photos/seed/451/900/700', description: 'A next-generation platform for AI-driven content creators, enabling autonomous brand partnerships and viral campaign orchestration at scale.' },
-  { title: 'Phantom Experience', client: 'Phantom', niche: 'XR / WEBGL', tags: ['WebGL', 'Immersive'], date: '2025', image: 'https://picsum.photos/seed/452/900/700', description: 'An award-winning immersive 3D experience built with OGL and custom GLSL shaders, redefining how users interact with digital spaces.' },
-  { title: 'Global Travel Hacker', client: 'Airbnb', niche: 'TRAVEL / APP', tags: ['Travel', 'UX'], date: '2024', image: 'https://picsum.photos/seed/453/900/700', description: 'An AI-powered travel assistant that crafts hyper-personalized itineraries by analyzing 40M+ data points in real time.' },
-  { title: 'Neural Brand Identity', client: 'Balenciaga', niche: 'BRAND / DESIGN', tags: ['Design', 'AI'], date: '2024', image: 'https://picsum.photos/seed/454/900/700', description: 'A generative visual identity system trained on brand psychology data, producing adaptive logos and typography that evolve with context.' },
-  { title: 'VR Engine Launch', client: 'Sony', niche: 'VR / ENGINE', tags: ['Three.js', 'WebXR'], date: '2025', image: 'https://picsum.photos/seed/455/900/700', description: 'A full-immersion WebXR framework enabling 60fps volumetric experiences directly inside any browser without plugins.' },
-  { title: 'Streetwear Campaign', client: 'Nike', niche: 'CAMPAIGN / SOCIAL', tags: ['Fashion', 'Social'], date: '2024', image: 'https://picsum.photos/seed/456/900/700', description: 'A viral social-first campaign architecture that drove 12M impressions across Gen-Z platforms through coordinated micro-influencer drops.' },
-  { title: 'Tech Review Network', client: 'The Verge', niche: 'MEDIA / AI', tags: ['Review', 'Tech'], date: '2025', image: 'https://picsum.photos/seed/457/900/700', description: 'An automated review pipeline ingesting 800+ gadgets per month, generating expert-quality editorial content through fine-tuned LLMs.' },
-  { title: 'Visitor Experience', client: 'Tate Modern', niche: 'UX / PHYSICAL', tags: ['Museum', 'Interactive'], date: '2024', image: 'https://picsum.photos/seed/458/900/700', description: 'A multi-sensory journey design for a major natural history museum, merging AR overlays with physical exhibits.' },
-  { title: 'Data Visualization OS', client: 'Palantir', niche: 'DATA / B2B', tags: ['Analytics', 'Dashboard'], date: '2025', image: 'https://picsum.photos/seed/459/900/700', description: 'A real-time intelligence operating system for Fortune 500 analytics teams, rendering 2M+ data points at 120fps via WebGPU.' },
-  { title: 'Sonic Brand System', client: 'Spotify', niche: 'AUDIO / BRAND', tags: ['Branding', 'Sound'], date: '2024', image: 'https://picsum.photos/seed/460/900/700', description: 'A multisensory brand identity framework incorporating procedurally generated audio signatures for digital and physical touchpoints.' },
-  { title: 'Climate AI Monitor', client: 'UNEP', niche: 'ESG / DATA', tags: ['Climate', 'Data'], date: '2025', image: 'https://picsum.photos/seed/461/900/700', description: 'A planetary intelligence system aggregating satellite feeds, IoT sensors, and climate models into a single predictive dashboard.' },
-  { title: 'Creator Economy Hub', client: 'Meta', niche: 'WEB3 / SOCIAL', tags: ['NFT', 'Community'], date: '2024', image: 'https://picsum.photos/seed/462/900/700', description: 'A tokenized creative tools platform where artists mint skills, monetize tutorials, and build on-chain fan communities.' },
-  { title: 'Spatial Commerce', client: 'IKEA', niche: 'AR / RETAIL', tags: ['Retail', 'AR'], date: '2025', image: 'https://picsum.photos/seed/463/900/700', description: 'Shopping reimagined in mixed reality — try on clothes, arrange furniture, and complete purchases without leaving AR mode.' },
-  { title: 'Biotech Viz Platform', client: 'DeepMind', niche: 'SCIENCE / 3D', tags: ['Biology', 'Viz'], date: '2024', image: 'https://picsum.photos/seed/464/900/700', description: 'A molecular rendering engine capable of visualizing protein folding simulations at cellular resolution in the browser.' },
-  { title: 'Urban Intelligence', client: 'Sidewalk Labs', niche: 'SMART CITY', tags: ['City', 'IoT'], date: '2025', image: 'https://picsum.photos/seed/465/900/700', description: 'A connected city framework synchronizing 50,000+ IoT sensors to optimize energy, traffic, and emergency response in real time.' },
-  { title: 'Generative Fashion', client: 'Gucci', niche: 'FASHION / AI', tags: ['AI', 'Design'], date: '2024', image: 'https://picsum.photos/seed/466/900/700', description: 'An algorithmic couture system producing unique garment patterns from climate data, emotion states, and cultural archives.' },
+  { title: 'AI Influencer Platform', badge: 'AI', tags: ['Machine Learning', 'Web3'], date: '2025', image: 'https://picsum.photos/seed/451/900/700', description: 'A next-generation platform for AI-driven content creators, enabling autonomous brand partnerships and viral campaign orchestration at scale.' },
+  { title: 'Phantom Experience', badge: 'XR', tags: ['WebGL', 'Immersive'], date: '2025', image: 'https://picsum.photos/seed/452/900/700', description: 'An award-winning immersive 3D experience built with OGL and custom GLSL shaders, redefining how users interact with digital spaces.' },
+  { title: 'Global Travel Hacker', badge: 'APP', tags: ['Travel', 'UX'], date: '2024', image: 'https://picsum.photos/seed/453/900/700', description: 'An AI-powered travel assistant that crafts hyper-personalized itineraries by analyzing 40M+ data points in real time.' },
+  { title: 'Neural Brand Identity', badge: 'BRAND', tags: ['Design', 'AI'], date: '2024', image: 'https://picsum.photos/seed/454/900/700', description: 'A generative visual identity system trained on brand psychology data, producing adaptive logos and typography that evolve with context.' },
+  { title: 'VR Engine Launch', badge: 'VR', tags: ['Three.js', 'WebXR'], date: '2025', image: 'https://picsum.photos/seed/455/900/700', description: 'A full-immersion WebXR framework enabling 60fps volumetric experiences directly inside any browser without plugins.' },
+  { title: 'Streetwear Campaign', badge: 'CAMPAIGN', tags: ['Fashion', 'Social'], date: '2024', image: 'https://picsum.photos/seed/456/900/700', description: 'A viral social-first campaign architecture that drove 12M impressions across Gen-Z platforms through coordinated micro-influencer drops.' },
+  { title: 'Tech Review Network', badge: 'MEDIA', tags: ['Review', 'Tech'], date: '2025', image: 'https://picsum.photos/seed/457/900/700', description: 'An automated review pipeline ingesting 800+ gadgets per month, generating expert-quality editorial content through fine-tuned LLMs.' },
+  { title: 'Visitor Experience', badge: 'UX', tags: ['Museum', 'Interactive'], date: '2024', image: 'https://picsum.photos/seed/458/900/700', description: 'A multi-sensory journey design for a major natural history museum, merging AR overlays with physical exhibits.' },
+  { title: 'Data Visualization OS', badge: 'DATA', tags: ['Analytics', 'Dashboard'], date: '2025', image: 'https://picsum.photos/seed/459/900/700', description: 'A real-time intelligence operating system for Fortune 500 analytics teams, rendering 2M+ data points at 120fps via WebGPU.' },
+  { title: 'Sonic Brand System', badge: 'AUDIO', tags: ['Branding', 'Sound'], date: '2024', image: 'https://picsum.photos/seed/460/900/700', description: 'A multisensory brand identity framework incorporating procedurally generated audio signatures for digital and physical touchpoints.' },
+  { title: 'Climate AI Monitor', badge: 'ESG', tags: ['Climate', 'Data'], date: '2025', image: 'https://picsum.photos/seed/461/900/700', description: 'A planetary intelligence system aggregating satellite feeds, IoT sensors, and climate models into a single predictive dashboard.' },
+  { title: 'Creator Economy Hub', badge: 'WEB3', tags: ['NFT', 'Community'], date: '2024', image: 'https://picsum.photos/seed/462/900/700', description: 'A tokenized creative tools platform where artists mint skills, monetize tutorials, and build on-chain fan communities.' },
+  { title: 'Spatial Commerce', badge: 'AR', tags: ['Retail', 'AR'], date: '2025', image: 'https://picsum.photos/seed/463/900/700', description: 'Shopping reimagined in mixed reality — try on clothes, arrange furniture, and complete purchases without leaving AR mode.' },
+  { title: 'Biotech Viz Platform', badge: 'SCIENCE', tags: ['Biology', 'Viz'], date: '2024', image: 'https://picsum.photos/seed/464/900/700', description: 'A molecular rendering engine capable of visualizing protein folding simulations at cellular resolution in the browser.' },
+  { title: 'Urban Intelligence', badge: 'SMART', tags: ['City', 'IoT'], date: '2025', image: 'https://picsum.photos/seed/465/900/700', description: 'A connected city framework synchronizing 50,000+ IoT sensors to optimize energy, traffic, and emergency response in real time.' },
+  { title: 'Generative Fashion', badge: 'FASHION', tags: ['AI', 'Design'], date: '2024', image: 'https://picsum.photos/seed/466/900/700', description: 'An algorithmic couture system producing unique garment patterns from climate data, emotion states, and cultural archives.' },
 ]
 
 const GRID_OPTIONS: Partial<InfiniteGridOptions> = {
-  gridCols: 5,
-  gridRows: 5,
+  gridCols: 4,
+  gridRows: 4,
   tileSize: 2.4,
-  gridGap: 0.015, // Extremely tight gap
-  baseCameraZ: 7, // Closer camera
+  gridGap: 0.06,
+  baseCameraZ: 10,
   enablePostProcessing: true,
   postProcessParams: {
-    distortionIntensity: -0.35, // Dramatic barrel distortion
-    vignetteOffset: 0.1,
-    vignetteDarkness: 0.8, // Darker vignette
+    distortionIntensity: -0.18,
+    vignetteOffset: 0.0,
+    vignetteDarkness: 0.55,
   },
 }
 
