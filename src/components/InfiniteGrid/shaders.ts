@@ -12,26 +12,41 @@ export const tileVertex = /* glsl */`
   }
 `
 
-// Fragment shader for foreground tiles (card UI layer)
+/**
+ * Foreground tile shader.
+ * On hover, the dark card background lerps toward uHoverColor (the
+ * per-image dominant color), exactly replicating the phantom.land effect.
+ * map.a = 1 means a painted pixel (image/text), 0 means empty card background.
+ */
 export const tileFrag = /* glsl */`
   precision highp float;
   uniform sampler2D map;
-  uniform float uOpacity;
+  uniform vec3 uHoverColor;
+  uniform float uHoverProgress; // 0 = idle, 1 = fully hovered
   varying vec2 vUv;
 
   void main() {
-    vec4 color = texture2D(map, vUv);
-    gl_FragColor = vec4(color.rgb, color.a * uOpacity);
+    vec4 px = texture2D(map, vUv);
+
+    // Base card dark background
+    vec3 baseBg = vec3(0.063); // #101010
+
+    // Lerp background toward the card's dominant image color on hover
+    vec3 hoveredBg = mix(baseBg, uHoverColor, uHoverProgress);
+
+    // Painted pixels (image / text / UI) sit on top of the background
+    vec3 finalColor = mix(hoveredBg, px.rgb, px.a);
+
+    gl_FragColor = vec4(finalColor, 1.0);
   }
 `
 
-// Fragment shader for blurred background reveal on hover
+// Legacy — kept for compatibility, no longer used
 export const backgroundFrag = /* glsl */`
   precision highp float;
   uniform sampler2D map;
   uniform float uOpacity;
   varying vec2 vUv;
-
   void main() {
     vec4 color = texture2D(map, vUv);
     gl_FragColor = vec4(color.rgb, color.a * uOpacity);
