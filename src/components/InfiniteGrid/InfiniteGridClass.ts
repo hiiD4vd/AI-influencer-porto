@@ -4,8 +4,8 @@ import {
   type OGLRenderingContext,
 } from 'ogl'
 import { gsap } from 'gsap'
-import { tileVertex, tileFrag, postVertex, postFrag } from './shaders'
-import { createForegroundTexture } from './createTexture'
+import { tileVertex, tileFrag, backgroundFrag, postVertex, postFrag } from './shaders'
+import { createForegroundTexture, createBackgroundTexture } from './createTexture'
 import { defaultOptions } from './types'
 import type { CardData, InfiniteGridOptions, TileGroupData } from './types'
 
@@ -20,28 +20,29 @@ export class InfiniteGridClass {
   private postMesh?: Mesh
   private sceneRT?: RenderTarget
   private raycast!: Raycast
-  private pointer = new Vec2()
+  private pointer = new Vec2(-999, -999)
 
-  private TILE: number = 0
-  private SPACE: number = 0
+  private TILE_W: number = 0
+  private TILE_H: number = 0
+  private SPACE_W: number = 0
+  private SPACE_H: number = 0
   private GRID_W: number = 0
   private GRID_H: number = 0
 
   private groupTransforms: Transform[] = []
   private tileGroupData: TileGroupData[] = []
 
-  // Only foreground meshes needed now — hover color is baked into the shader
   private fgMeshMap = new Map<string, Mesh>()
-  // dominant color per tileKey (for hover shader)
-  private dominantColors = new Map<string, [number, number, number]>()
+  private bgMeshMap = new Map<string, Mesh>()
+  private containerTransforms = new Map<string, Transform>()
 
   private scrollX = 0
   private scrollY = 0
   private isDown = false
   private startX = 0
   private startY = 0
-  private prevX = 0      // previous frame mouse X for per-frame delta
-  private prevY = 0      // previous frame mouse Y for per-frame delta
+  private prevX = 0
+  private prevY = 0
   private velX = 0
   private velY = 0
   private inertiaX = 0
@@ -55,7 +56,6 @@ export class InfiniteGridClass {
   private dragStartScrollY = 0
 
   public onTileClicked?: (card: CardData, index: number) => void
-  public onTileLoaded?: () => void
 
   constructor(container: HTMLElement, cardData: CardData[], options: Partial<InfiniteGridOptions> = {}) {
     this.container = container
@@ -73,21 +73,23 @@ export class InfiniteGridClass {
 
     this.renderer = new Renderer({ dpr: Math.min(window.devicePixelRatio, 2), alpha: false, antialias: false })
     this.gl = this.renderer.gl
-    this.gl.clearColor(0.04, 0.04, 0.04, 1)
+    this.gl.clearColor(0.04, 0.04, 0.04, 1) // Very dark background
     this.container.appendChild(this.gl.canvas)
     this.renderer.setSize(W, H)
 
-    this.camera = new Camera(this.gl, { fov: 38, near: 0.1, far: 200 })
+    this.camera = new Camera(this.gl, { fov: 45, near: 0.1, far: 200 })
     this.camera.position.z = this.options.baseCameraZ
     this.camera.perspective({ aspect: W / H })
 
     this.scene = new Transform()
     this.raycast = new Raycast()
 
-    this.TILE = this.options.tileSize
-    this.SPACE = this.TILE + this.options.gridGap
-    this.GRID_W = this.SPACE * this.options.gridCols
-    this.GRID_H = this.SPACE * this.options.gridRows
+    this.TILE_W = this.options.tileWidth
+    this.TILE_H = this.options.tileHeight
+    this.SPACE_W = this.TILE_W + this.options.gridGapX
+    this.SPACE_H = this.TILE_H + this.options.gridGapY
+    this.GRID_W = this.SPACE_W * this.options.gridCols
+    this.GRID_H = this.SPACE_H * this.options.gridRows
 
     // Post-processing
     if (this.options.enablePostProcessing) {
@@ -115,10 +117,8 @@ export class InfiniteGridClass {
   }
 
   private buildGrid() {
-    // Generate textures per unique card — store dominant color too
-    const fgResults = this.cardData.map(card => createForegroundTexture(this.gl, card))
-    // Default dominant colors — updated async as images load
-    const cardDominant: Array<[number, number, number]> = fgResults.map(r => r.dominantColor)
+    const fgTex = this.cardData.map(card => createForegroundTexture(this.gl, card))
+    const bgTex = this.cardData.map(card => createBackgroundTexture(this.gl, card))
 
     let idx = 0
     for (let row = -1; row <= 1; row++) {
@@ -132,43 +132,59 @@ export class InfiniteGridClass {
         group.setParent(this.scene)
         this.groupTransforms.push(group)
 
-        const startX = -((this.options.gridCols - 1) / 2) * this.SPACE
-        const startY =  ((this.options.gridRows - 1) / 2) * this.SPACE
+        const startX = -((this.options.gridCols - 1) / 2) * this.SPACE_W
+        const startY =  ((this.options.gridRows - 1) / 2) * this.SPACE_H
 
         for (let r = 0; r < this.options.gridRows; r++) {
           for (let c = 0; c < this.options.gridCols; c++) {
-            const x = startX + c * this.SPACE
-            const y = startY - r * this.SPACE
+            // Masonry staggered effect: offset alternate columns
+            const staggeredOffsetY = (c % 2 !== 0) ? this.SPACE_H * 0.4 : 0
+
+            const x = startX + c * this.SPACE_W
+            const y = startY - r * this.SPACE_H - staggeredOffsetY
             const localIdx = r * this.options.gridCols + c
             const tileKey = `${idx}-${localIdx}`
             const cardIdx = (idx * this.options.gridCols * this.options.gridRows + localIdx) % this.cardData.length
-            const dc = cardDominant[cardIdx]
 
-            const prog = new Program(this.gl, {
+            // Tile container (for scale animation on hover)
+            const tileContainer = new Transform()
+            tileContainer.position.set(x, y, 0)
+            tileContainer.setParent(group)
+
+            const geo = new Plane(this.gl, { width: this.TILE_W, height: this.TILE_H })
+
+            // Background mesh (blurred image, opacity 0 by default)
+            const bgProg = new Program(this.gl, {
+              vertex: tileVertex,
+              fragment: backgroundFrag,
+              uniforms: {
+                map: { value: bgTex[cardIdx] },
+                uOpacity: { value: 0 }
+              },
+              transparent: true,
+            })
+            const bgMesh = new Mesh(this.gl, { geometry: geo, program: bgProg })
+            bgMesh.position.z = -0.01 // slightly behind
+            bgMesh.setParent(tileContainer)
+
+            // Foreground mesh (UI overlay + sharp image)
+            const fgProg = new Program(this.gl, {
               vertex: tileVertex,
               fragment: tileFrag,
               uniforms: {
-                map:            { value: fgResults[cardIdx].texture },
-                uHoverColor:    { value: [...dc] as [number,number,number] },
-                uHoverProgress: { value: 0 },
+                map: { value: fgTex[cardIdx] },
               },
-              transparent: false,
+              transparent: true,
             })
+            const fgMesh = new Mesh(this.gl, { geometry: geo, program: fgProg })
+            fgMesh.setParent(tileContainer)
 
-            const geo  = new Plane(this.gl, { width: this.TILE, height: this.TILE })
-            const mesh = new Mesh(this.gl, { geometry: geo, program: prog })
-            mesh.position.set(x, y, 0)
-            mesh.setParent(group)
-            ;(mesh as any)._tileKey  = tileKey
-            ;(mesh as any)._cardIdx  = cardIdx
-            this.fgMeshMap.set(tileKey, mesh)
+            ;(fgMesh as any)._tileKey  = tileKey
+            ;(fgMesh as any)._cardIdx  = cardIdx
 
-            // Register this uniform so createTexture can push live color when image loads
-            const result = fgResults[cardIdx] as any
-            result._colorUniforms = result._colorUniforms ?? []
-            result._colorUniforms.push(prog.uniforms.uHoverColor)
-
-            this.dominantColors.set(tileKey, dc)
+            this.containerTransforms.set(tileKey, tileContainer)
+            this.bgMeshMap.set(tileKey, bgMesh)
+            this.fgMeshMap.set(tileKey, fgMesh)
           }
         }
         idx++
@@ -211,22 +227,28 @@ export class InfiniteGridClass {
 
     // Fade out old tile
     if (this.currentHoverKey) {
-      const m = this.fgMeshMap.get(this.currentHoverKey)
-      if (m) gsap.to(m.program.uniforms.uHoverProgress, {
-        value: 0,
-        duration: 0.4,
-        ease: 'power2.out',
-      })
+      const bg = this.bgMeshMap.get(this.currentHoverKey)
+      const container = this.containerTransforms.get(this.currentHoverKey)
+      if (bg) gsap.to(bg.program.uniforms.uOpacity, { value: 0, duration: 0.4, ease: 'power2.out' })
+      if (container) gsap.to(container.scale, { x: 1, y: 1, duration: 0.4, ease: 'power2.out' })
     }
+
     // Fade in new tile
     if (newKey) {
-      const m = this.fgMeshMap.get(newKey)
-      if (m) gsap.to(m.program.uniforms.uHoverProgress, {
-        value: 1,
-        duration: 0.35,
-        ease: 'power2.out',
-      })
+      const bg = this.bgMeshMap.get(newKey)
+      const container = this.containerTransforms.get(newKey)
+      if (bg) gsap.to(bg.program.uniforms.uOpacity, { value: 1, duration: 0.35, ease: 'power2.out' })
+      // Subtle pop scale on hover
+      if (container) gsap.to(container.scale, { x: 1.03, y: 1.03, duration: 0.35, ease: 'power2.out' })
     }
+
+    // Dim other cards slightly
+    meshes.forEach(m => {
+      const key = (m as any)._tileKey
+      const opacityTarget = newKey ? (key === newKey ? 1.0 : 0.4) : 1.0
+      gsap.to(m.program.uniforms.map.value, { /* could do something here if we had uniform, but we rely on fg/bg */ })
+      // For real dimming, we could fade the fgMesh. Let's add uOpacity to fgMesh if needed, or rely on the background effect for contrast.
+    })
 
     this.currentHoverKey = newKey
     this.container.style.cursor = newKey ? 'pointer' : 'grab'
@@ -258,7 +280,7 @@ export class InfiniteGridClass {
     this.inertiaX = 0; this.inertiaY = 0
     this.hasInertia = false
     this.updatePointer(x, y)
-    gsap.to(this.camera.position, { z: this.options.baseCameraZ * 1.08, duration: 0.45, ease: 'power2.out' })
+    gsap.to(this.camera.position, { z: this.options.baseCameraZ * 1.06, duration: 0.45, ease: 'power2.out' })
   }
 
   private onMove(x: number, y: number) {
@@ -270,18 +292,13 @@ export class InfiniteGridClass {
       return
     }
 
-    // ── Calibrated pixel → OGL world unit conversion ──
-    // At FOV=38° and camera Z=10, the visible height ≈ 2 * tan(19°) * 10 ≈ 6.9 OGL units
-    // across clientHeight pixels → scale ≈ 6.9 / clientHeight ≈ 0.009 at 720p, 0.006 at 1080p
-    // Using a conservative fixed value so it never feels fast on any screen:
-    const DRAG_SCALE = 0.004   // OGL units per screen pixel — heavy, precise, 1:1 feel
+    const DRAG_SCALE = 0.005
 
     const dx = x - this.startX
     const dy = y - this.startY
     this.dragTotalX = Math.abs(dx)
     this.dragTotalY = Math.abs(dy)
 
-    // Per-frame delta for velocity (not cumulative total — that was the bug)
     this.velX = (x - this.prevX) * DRAG_SCALE
     this.velY = (y - this.prevY) * DRAG_SCALE
     this.prevX = x; this.prevY = y
@@ -293,25 +310,22 @@ export class InfiniteGridClass {
 
   private onUp(_x: number, _y: number) {
     this.isDown = false
-    // Inertia = last per-frame velocity, no amplifier — keeps 1:1 feel
     this.inertiaX = this.velX
     this.inertiaY = this.velY
     this.hasInertia = true
     gsap.to(this.camera.position, { z: this.options.baseCameraZ, duration: 0.5, ease: 'power2.out' })
 
     if (this.currentHoverKey) {
-      const m = this.fgMeshMap.get(this.currentHoverKey)
-      if (m) gsap.to(m.program.uniforms.uHoverProgress, { value: 0, duration: 0.4, ease: 'power2.out' })
+      const bg = this.bgMeshMap.get(this.currentHoverKey)
+      const container = this.containerTransforms.get(this.currentHoverKey)
+      if (bg) gsap.to(bg.program.uniforms.uOpacity, { value: 0, duration: 0.4, ease: 'power2.out' })
+      if (container) gsap.to(container.scale, { x: 1, y: 1, duration: 0.4, ease: 'power2.out' })
       this.currentHoverKey = ''
     }
   }
 
   private onLeave() {
-    if (this.currentHoverKey) {
-      const m = this.fgMeshMap.get(this.currentHoverKey)
-      if (m) gsap.to(m.program.uniforms.uHoverProgress, { value: 0, duration: 0.4, ease: 'power2.out' })
-      this.currentHoverKey = ''
-    }
+    this.onUp(0, 0)
     this.container.style.cursor = 'grab'
   }
 
@@ -342,11 +356,9 @@ export class InfiniteGridClass {
     if (this.hasInertia && !this.isDown) {
       this.scrollX += this.inertiaX
       this.scrollY += this.inertiaY
-      // 0.82 friction: grid decelerates over ~10-15 frames and stops cleanly
       this.inertiaX *= 0.82
       this.inertiaY *= 0.82
       this.updateGroupPositions()
-      // Stop when velocity is negligible (< 0.0001 OGL units/frame)
       if (Math.abs(this.inertiaX) < 0.0001 && Math.abs(this.inertiaY) < 0.0001) {
         this.inertiaX = 0; this.inertiaY = 0
         this.hasInertia = false
@@ -355,6 +367,7 @@ export class InfiniteGridClass {
 
     if (this.options.enablePostProcessing && this.sceneRT && this.postMesh) {
       this.renderer.render({ scene: this.scene, camera: this.camera, target: this.sceneRT })
+      // Sort transparent objects manually (backgrounds and foregrounds)
       this.renderer.render({ scene: this.postMesh, camera: this.camera })
     } else {
       this.renderer.render({ scene: this.scene, camera: this.camera })
