@@ -40,6 +40,8 @@ export class InfiniteGridClass {
   private isDown = false
   private startX = 0
   private startY = 0
+  private prevX = 0      // previous frame mouse X for per-frame delta
+  private prevY = 0      // previous frame mouse Y for per-frame delta
   private velX = 0
   private velY = 0
   private inertiaX = 0
@@ -248,13 +250,15 @@ export class InfiniteGridClass {
   private onDown(x: number, y: number) {
     this.isDown = true
     this.startX = x; this.startY = y
+    this.prevX  = x; this.prevY  = y
     this.dragStartScrollX = this.scrollX
     this.dragStartScrollY = this.scrollY
     this.dragTotalX = 0; this.dragTotalY = 0
     this.velX = 0; this.velY = 0
+    this.inertiaX = 0; this.inertiaY = 0
     this.hasInertia = false
     this.updatePointer(x, y)
-    gsap.to(this.camera.position, { z: this.options.baseCameraZ * 1.12, duration: 0.4, ease: 'power2.out' })
+    gsap.to(this.camera.position, { z: this.options.baseCameraZ * 1.08, duration: 0.45, ease: 'power2.out' })
   }
 
   private onMove(x: number, y: number) {
@@ -266,28 +270,35 @@ export class InfiniteGridClass {
       return
     }
 
+    // ── Calibrated pixel → OGL world unit conversion ──
+    // At FOV=38° and camera Z=10, the visible height ≈ 2 * tan(19°) * 10 ≈ 6.9 OGL units
+    // across clientHeight pixels → scale ≈ 6.9 / clientHeight ≈ 0.009 at 720p, 0.006 at 1080p
+    // Using a conservative fixed value so it never feels fast on any screen:
+    const DRAG_SCALE = 0.004   // OGL units per screen pixel — heavy, precise, 1:1 feel
+
     const dx = x - this.startX
     const dy = y - this.startY
     this.dragTotalX = Math.abs(dx)
     this.dragTotalY = Math.abs(dy)
 
-    const scale = 0.013
-    this.velX = (x - this.startX) * scale * 0.3
-    this.velY = (y - this.startY) * scale * 0.3
+    // Per-frame delta for velocity (not cumulative total — that was the bug)
+    this.velX = (x - this.prevX) * DRAG_SCALE
+    this.velY = (y - this.prevY) * DRAG_SCALE
+    this.prevX = x; this.prevY = y
 
-    this.scrollX = this.dragStartScrollX + dx * scale
-    this.scrollY = this.dragStartScrollY - dy * scale
+    this.scrollX = this.dragStartScrollX + dx * DRAG_SCALE
+    this.scrollY = this.dragStartScrollY - dy * DRAG_SCALE
     this.updateGroupPositions()
   }
 
   private onUp(_x: number, _y: number) {
     this.isDown = false
-    this.inertiaX = this.velX * 20
-    this.inertiaY = this.velY * 20
+    // Inertia = last per-frame velocity, no amplifier — keeps 1:1 feel
+    this.inertiaX = this.velX
+    this.inertiaY = this.velY
     this.hasInertia = true
     gsap.to(this.camera.position, { z: this.options.baseCameraZ, duration: 0.5, ease: 'power2.out' })
 
-    // Clear hover on drag-end
     if (this.currentHoverKey) {
       const m = this.fgMeshMap.get(this.currentHoverKey)
       if (m) gsap.to(m.program.uniforms.uHoverProgress, { value: 0, duration: 0.4, ease: 'power2.out' })
@@ -331,10 +342,15 @@ export class InfiniteGridClass {
     if (this.hasInertia && !this.isDown) {
       this.scrollX += this.inertiaX
       this.scrollY += this.inertiaY
-      this.inertiaX *= 0.91
-      this.inertiaY *= 0.91
+      // 0.82 friction: grid decelerates over ~10-15 frames and stops cleanly
+      this.inertiaX *= 0.82
+      this.inertiaY *= 0.82
       this.updateGroupPositions()
-      if (Math.abs(this.inertiaX) < 0.00005 && Math.abs(this.inertiaY) < 0.00005) this.hasInertia = false
+      // Stop when velocity is negligible (< 0.0001 OGL units/frame)
+      if (Math.abs(this.inertiaX) < 0.0001 && Math.abs(this.inertiaY) < 0.0001) {
+        this.inertiaX = 0; this.inertiaY = 0
+        this.hasInertia = false
+      }
     }
 
     if (this.options.enablePostProcessing && this.sceneRT && this.postMesh) {
