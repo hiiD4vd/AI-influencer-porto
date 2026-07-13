@@ -2,8 +2,8 @@ import type { OGLRenderingContext, Texture } from 'ogl'
 import { Texture as OGLTexture } from 'ogl'
 import type { CardData } from './types'
 
-const FONT = `500 11px 'Inter', -apple-system, sans-serif`
-const FONT_SM = `500 9px 'Inter', -apple-system, sans-serif`
+const FONT = `600 24px 'Inter', -apple-system, sans-serif`
+const FONT_SM = `500 16px 'Inter', -apple-system, sans-serif`
 
 export interface TexturePair {
   foreground: Texture
@@ -11,22 +11,11 @@ export interface TexturePair {
 }
 
 // ─── Foreground: 4-corner metadata + centered fullbleed image ────────────────
-/**
- * Layout (percentage of canvas height):
- *
- *   [niche · tags top-left]    [year top-right]    ← TOP STRIP 14%
- *   ┌────────────────────────────────────────┐
- *   │                                        │
- *   │          FULLBLEED IMAGE               │  CENTER 72%
- *   │                                        │
- *   └────────────────────────────────────────┘
- *   [client bottom-left]       [tags bottom-right] ← BOTTOM STRIP 14%
- */
 export function createForegroundTexture(
   gl: OGLRenderingContext,
   card: CardData,
   cw = 512,   // canvas width
-  ch = 568,   // canvas height (taller than wide for portrait)
+  ch = 672,   // canvas height (taller to match new 1.6 x 2.1 aspect ratio)
 ): Texture {
   const scale = 2
   const cvs = document.createElement('canvas')
@@ -34,11 +23,10 @@ export function createForegroundTexture(
   const ctx = cvs.getContext('2d')!
   ctx.scale(scale, scale)
 
-  const STRIP = Math.round(ch * 0.13)   // top/bottom text zone height
+  const STRIP = Math.round(ch * 0.12)
   const IMG_Y = STRIP
   const IMG_H = ch - STRIP * 2
 
-  // Fully transparent start — bg will show through
   ctx.clearRect(0, 0, cw, ch)
 
   const tex = new OGLTexture(gl, {
@@ -51,7 +39,6 @@ export function createForegroundTexture(
   function paint(img?: HTMLImageElement) {
     ctx.clearRect(0, 0, cw, ch)
 
-    // ── Image (center, fullbleed, no padding) ──
     if (img) {
       ctx.save()
       ctx.beginPath()
@@ -63,53 +50,48 @@ export function createForegroundTexture(
       if (ar > tar) { sw = img.height * tar; sx = (img.width - sw) / 2 }
       else           { sh = img.width / tar;  sy = (img.height - sh) / 2 }
       ctx.drawImage(img, sx, sy, sw, sh, 0, IMG_Y, cw, IMG_H)
+      
+      // Dim the image slightly so corner text stands out if we ever move it over image, 
+      // or just to look moody.
+      ctx.fillStyle = 'rgba(0,0,0,0.15)'
+      ctx.fillRect(0, IMG_Y, cw, IMG_H)
       ctx.restore()
-      // subtle inner shadow over image bottom so bottom text stays legible
-      const grad = ctx.createLinearGradient(0, IMG_Y + IMG_H - 40, 0, IMG_Y + IMG_H)
-      grad.addColorStop(0, 'rgba(0,0,0,0)')
-      grad.addColorStop(1, 'rgba(0,0,0,0.35)')
-      ctx.fillStyle = grad
-      ctx.fillRect(0, IMG_Y + IMG_H - 40, cw, 40)
     } else {
-      // placeholder
       ctx.fillStyle = 'rgba(255,255,255,0.04)'
       ctx.fillRect(0, IMG_Y, cw, IMG_H)
     }
 
-    // ── TOP STRIP ──
-    const ty = STRIP / 2   // vertical center of strip
+    const ty = STRIP / 2
     ctx.textBaseline = 'middle'
 
     // Top-left: niche
     ctx.font = FONT_SM
     ctx.fillStyle = 'rgba(255,255,255,0.45)'
     ctx.textAlign = 'left'
-    ctx.fillText(card.niche.toUpperCase(), 10, ty)
+    ctx.fillText(card.niche.toUpperCase(), 24, ty)
 
     // Top-right: year
     ctx.textAlign = 'right'
     ctx.fillStyle = 'rgba(255,255,255,0.3)'
-    ctx.fillText(card.date, cw - 10, ty)
+    ctx.fillText(card.date, cw - 24, ty)
 
-    // ── BOTTOM STRIP ──
     const by = ch - STRIP / 2
 
-    // Bottom-left: client (brighter, more prominent)
+    // Bottom-left: client
     ctx.font = FONT
     ctx.fillStyle = 'rgba(255,255,255,0.9)'
     ctx.textAlign = 'left'
-    ctx.fillText(card.client, 10, by)
+    ctx.fillText(card.client, 24, by)
 
-    // Bottom-right: tags separated by ·
+    // Bottom-right: tags
     ctx.font = FONT_SM
     ctx.fillStyle = 'rgba(255,255,255,0.35)'
     ctx.textAlign = 'right'
-    const tagsStr = card.tags.join(' · ')
-    ctx.fillText(tagsStr, cw - 10, by)
+    ctx.fillText(card.tags.join(' · '), cw - 24, by)
 
-    // Hairline borders between strips and image
-    ctx.strokeStyle = 'rgba(255,255,255,0.07)'
-    ctx.lineWidth = 0.5
+    // Hairline borders
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)'
+    ctx.lineWidth = 1
     ctx.beginPath()
     ctx.moveTo(0, STRIP); ctx.lineTo(cw, STRIP)
     ctx.moveTo(0, ch - STRIP); ctx.lineTo(cw, ch - STRIP)
@@ -136,7 +118,7 @@ export function createBackgroundTexture(
   gl: OGLRenderingContext,
   card: CardData,
   cw = 512,
-  ch = 568,
+  ch = 672,
 ): Texture {
   const cvs = document.createElement('canvas')
   cvs.width = cw; cvs.height = ch

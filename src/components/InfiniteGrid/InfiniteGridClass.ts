@@ -137,8 +137,8 @@ export class InfiniteGridClass {
 
         for (let r = 0; r < this.options.gridRows; r++) {
           for (let c = 0; c < this.options.gridCols; c++) {
-            // Masonry staggered effect: offset alternate columns
-            const staggeredOffsetY = (c % 2 !== 0) ? this.SPACE_H * 0.4 : 0
+            // Masonry staggered effect: offset alternate columns perfectly by 50%
+            const staggeredOffsetY = (c % 2 !== 0) ? this.SPACE_H * 0.5 : 0
 
             const x = startX + c * this.SPACE_W
             const y = startY - r * this.SPACE_H - staggeredOffsetY

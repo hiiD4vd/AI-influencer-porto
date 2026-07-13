@@ -1,4 +1,4 @@
-// Vertex shader for grid tiles
+// Vertex shader for grid tiles with 3D parabolic displacement
 export const tileVertex = /* glsl */`
   attribute vec3 position;
   attribute vec2 uv;
@@ -8,12 +8,19 @@ export const tileVertex = /* glsl */`
 
   void main() {
     vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    
+    // Parabolic dome distortion: 
+    // pushes vertices away along the Z axis the further they are from screen center.
+    // This perfectly replicates the phantom.land curved screen effect without 2D fish-eye artifacts.
+    float distSq = (mvPosition.x * mvPosition.x) + (mvPosition.y * mvPosition.y) * 0.5;
+    mvPosition.z -= distSq * 0.08; 
+
+    gl_Position = projectionMatrix * mvPosition;
   }
 `
 
 // Foreground tile: transparent bg, image + text sit on top
-// alpha = 0 means "show whatever is behind me" (blurred bg or dark void)
 export const tileFrag = /* glsl */`
   precision highp float;
   uniform sampler2D map;

@@ -28,14 +28,14 @@ export interface InfiniteGridOptions {
 export const defaultOptions: InfiniteGridOptions = {
   gridCols: 7,
   gridRows: 5,
-  tileWidth: 1.55,
-  tileHeight: 1.72,
-  gridGapX: 0.025,
-  gridGapY: 0.025,
-  baseCameraZ: 8,
-  enablePostProcessing: true,
+  tileWidth: 1.6,
+  tileHeight: 2.1,
+  gridGapX: 0.1,
+  gridGapY: 0.1,
+  baseCameraZ: 7,
+  enablePostProcessing: false, // Turned off! We use 3D vertex displacement for curvature now.
   postProcessParams: {
-    distortionIntensity: -0.28,
+    distortionIntensity: 0,
     vignetteOffset: -0.1,
     vignetteDarkness: 0.72,
   },
