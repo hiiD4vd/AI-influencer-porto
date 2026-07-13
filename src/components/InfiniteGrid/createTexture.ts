@@ -138,18 +138,18 @@ export function createForegroundTexture(
 
   const tex = new OGLTexture(gl, {
     image: cvs,
-    generateMipmaps: false,
-    minFilter: (gl as WebGLRenderingContext).LINEAR,
+    generateMipmaps: true,
+    minFilter: (gl as WebGLRenderingContext).LINEAR_MIPMAP_LINEAR,
     magFilter: (gl as WebGLRenderingContext).LINEAR,
   })
 
   let dominantColor: [number, number, number] = [0.06, 0.06, 0.06]
 
   const PAD = 16
-  const TEXT_PAD = 14
-  // Maximize image area (leave just enough room for top/bottom text)
-  const imageY = PAD + 32
-  const imageH = h - (PAD * 2) - 64
+  const MARGIN_TOP = 52
+  const MARGIN_BOTTOM = 52
+  const imageY = MARGIN_TOP
+  const imageH = h - MARGIN_TOP - MARGIN_BOTTOM
 
   function paintUI(img?: HTMLImageElement) {
     ctx.clearRect(0, 0, w, h)
@@ -181,8 +181,8 @@ export function createForegroundTexture(
     }
 
     // ── 4-Corner Metadata (Phantom.land style) ──
-    ctx.font = `600 16px ${FONT_BASE}`
-    ctx.fillStyle = 'rgba(255,255,255,0.95)' // Much brighter for visibility
+    ctx.font = `600 24px ${FONT_BASE}`
+    ctx.fillStyle = 'rgba(255,255,255,1)' // Maximum brightness for visibility
     
     // Support modern canvas letterSpacing for that premium editorial look
     if ('letterSpacing' in ctx) {
@@ -191,22 +191,21 @@ export function createForegroundTexture(
 
     // 1. Top-Left: Title
     ctx.textAlign = 'left'
-    ctx.textBaseline = 'top'
-    ctx.fillText(card.title.toUpperCase(), PAD + 8, PAD + TEXT_PAD)
+    ctx.textBaseline = 'middle'
+    ctx.fillText(card.title.toUpperCase(), PAD + 8, MARGIN_TOP / 2)
 
     // 2. Top-Right: Brand/Badge
     ctx.textAlign = 'right'
-    ctx.fillText(card.badge.toUpperCase(), w - PAD - 8, PAD + TEXT_PAD)
+    ctx.fillText(card.badge.toUpperCase(), w - PAD - 8, MARGIN_TOP / 2)
 
     // 3. Bottom-Left: Tags
     ctx.textAlign = 'left'
-    ctx.textBaseline = 'bottom'
     const tagsText = card.tags.join('   ·   ').toUpperCase()
-    ctx.fillText(tagsText, PAD + 8, h - PAD - TEXT_PAD)
+    ctx.fillText(tagsText, PAD + 8, h - MARGIN_BOTTOM / 2)
 
     // 4. Bottom-Right: Date
     ctx.textAlign = 'right'
-    ctx.fillText(card.date, w - PAD - 8, h - PAD - TEXT_PAD)
+    ctx.fillText(card.date, w - PAD - 8, h - MARGIN_BOTTOM / 2)
 
     // Reset letterSpacing
     if ('letterSpacing' in ctx) {
