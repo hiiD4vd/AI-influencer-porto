@@ -28,13 +28,14 @@ export const tileFrag = /* glsl */`
   void main() {
     vec4 px = texture2D(map, vUv);
 
-    // Base card dark background
-    vec3 baseBg = vec3(0.063); // #101010
+    // Base card — near-black
+    vec3 baseBg = vec3(0.055); // #0e0e0e
 
-    // Lerp background toward the card's dominant image color on hover
-    vec3 hoveredBg = mix(baseBg, uHoverColor, uHoverProgress);
+    // Lerp toward the card's extracted dark-moody color on hover.
+    // Cap at 0.82 so there's always a dark undertone — never fully saturated.
+    vec3 hoveredBg = mix(baseBg, uHoverColor, uHoverProgress * 0.82);
 
-    // Painted pixels (image / text / UI) sit on top of the background
+    // Painted pixels (image / text / tags) sit on top of the background
     vec3 finalColor = mix(hoveredBg, px.rgb, px.a);
 
     gl_FragColor = vec4(finalColor, 1.0);
