@@ -22,8 +22,10 @@ export class InfiniteGridClass {
   private raycast!: Raycast
   private pointer = new Vec2()
 
-  private TILE: number = 0
-  private SPACE: number = 0
+  private TILE_W: number = 0
+  private TILE_H: number = 0
+  private SPACE_X: number = 0
+  private SPACE_Y: number = 0
   private GRID_W: number = 0
   private GRID_H: number = 0
 
@@ -84,10 +86,12 @@ export class InfiniteGridClass {
     this.scene = new Transform()
     this.raycast = new Raycast()
 
-    this.TILE = this.options.tileSize
-    this.SPACE = this.TILE + this.options.gridGap
-    this.GRID_W = this.SPACE * this.options.gridCols
-    this.GRID_H = this.SPACE * this.options.gridRows
+    this.TILE_H = this.options.tileSize
+    this.TILE_W = this.TILE_H * (16 / 9)
+    this.SPACE_X = this.TILE_W + this.options.gridGap
+    this.SPACE_Y = this.TILE_H + this.options.gridGap
+    this.GRID_W = this.SPACE_X * this.options.gridCols
+    this.GRID_H = this.SPACE_Y * this.options.gridRows
 
     // Post-processing
     if (this.options.enablePostProcessing) {
@@ -132,13 +136,13 @@ export class InfiniteGridClass {
         group.setParent(this.scene)
         this.groupTransforms.push(group)
 
-        const startX = -((this.options.gridCols - 1) / 2) * this.SPACE
-        const startY =  ((this.options.gridRows - 1) / 2) * this.SPACE
+        const startX = -((this.options.gridCols - 1) / 2) * this.SPACE_X
+        const startY =  ((this.options.gridRows - 1) / 2) * this.SPACE_Y
 
         for (let r = 0; r < this.options.gridRows; r++) {
           for (let c = 0; c < this.options.gridCols; c++) {
-            const x = startX + c * this.SPACE
-            const y = startY - r * this.SPACE
+            const x = startX + c * this.SPACE_X
+            const y = startY - r * this.SPACE_Y
             const localIdx = r * this.options.gridCols + c
             const tileKey = `${idx}-${localIdx}`
             const cardIdx = (idx * this.options.gridCols * this.options.gridRows + localIdx) % this.cardData.length
@@ -155,7 +159,7 @@ export class InfiniteGridClass {
               transparent: false,
             })
 
-            const geo  = new Plane(this.gl, { width: this.TILE, height: this.TILE })
+            const geo  = new Plane(this.gl, { width: this.TILE_W, height: this.TILE_H })
             const mesh = new Mesh(this.gl, { geometry: geo, program: prog })
             mesh.position.set(x, y, 0)
             mesh.setParent(group)

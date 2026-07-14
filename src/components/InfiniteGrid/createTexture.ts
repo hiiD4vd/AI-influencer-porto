@@ -118,7 +118,7 @@ function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: n
 export function createForegroundTexture(
   gl: OGLRenderingContext,
   card: CardData,
-  w = 512,
+  w = 910,
   h = 512,
 ): TextureResult {
   const scale = 2
