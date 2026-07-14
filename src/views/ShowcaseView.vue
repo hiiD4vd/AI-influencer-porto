@@ -65,34 +65,31 @@ const VIDEOS = [
   '/videos/opt_TRUCK TIRE.mp4'
 ]
 
-const CARD_DATA: CardData[] = [
-  { title: 'AI Influencer Platform', badge: 'AI', tags: ['Machine Learning', 'Web3'], date: '2025', video: VIDEOS[0], description: 'A next-generation platform for AI-driven content creators, enabling autonomous brand partnerships and viral campaign orchestration at scale.' },
-  { title: 'Phantom Experience', badge: 'XR', tags: ['WebGL', 'Immersive'], date: '2025', video: VIDEOS[1], description: 'An award-winning immersive 3D experience built with OGL and custom GLSL shaders, redefining how users interact with digital spaces.' },
-  { title: 'Global Travel Hacker', badge: 'APP', tags: ['Travel', 'UX'], date: '2024', video: VIDEOS[2], description: 'An AI-powered travel assistant that crafts hyper-personalized itineraries by analyzing 40M+ data points in real time.' },
-  { title: 'Neural Brand Identity', badge: 'BRAND', tags: ['Design', 'AI'], date: '2024', video: VIDEOS[3], description: 'A generative visual identity system trained on brand psychology data, producing adaptive logos and typography that evolve with context.' },
-  { title: 'VR Engine Launch', badge: 'VR', tags: ['Three.js', 'WebXR'], date: '2025', video: VIDEOS[4], description: 'A full-immersion WebXR framework enabling 60fps volumetric experiences directly inside any browser without plugins.' },
-  { title: 'Streetwear Campaign', badge: 'CAMPAIGN', tags: ['Fashion', 'Social'], date: '2024', video: VIDEOS[5], description: 'A viral social-first campaign architecture that drove 12M impressions across Gen-Z platforms through coordinated micro-influencer drops.' },
-  { title: 'Tech Review Network', badge: 'MEDIA', tags: ['Review', 'Tech'], date: '2025', video: VIDEOS[6], description: 'An automated review pipeline ingesting 800+ gadgets per month, generating expert-quality editorial content through fine-tuned LLMs.' },
-  { title: 'Visitor Experience', badge: 'UX', tags: ['Museum', 'Interactive'], date: '2024', video: VIDEOS[7], description: 'A multi-sensory journey design for a major natural history museum, merging AR overlays with physical exhibits.' },
-  { title: 'Data Visualization OS', badge: 'DATA', tags: ['Analytics', 'Dashboard'], date: '2025', video: VIDEOS[8], description: 'A real-time intelligence operating system for Fortune 500 analytics teams, rendering 2M+ data points at 120fps via WebGPU.' },
-  { title: 'Sonic Brand System', badge: 'AUDIO', tags: ['Branding', 'Sound'], date: '2024', video: VIDEOS[9], description: 'A multisensory brand identity framework incorporating procedurally generated audio signatures for digital and physical touchpoints.' },
-  { title: 'Climate AI Monitor', badge: 'ESG', tags: ['Climate', 'Data'], date: '2025', video: VIDEOS[10], description: 'A planetary intelligence system aggregating satellite feeds, IoT sensors, and climate models into a single predictive dashboard.' },
-  { title: 'Creator Economy Hub', badge: 'WEB3', tags: ['NFT', 'Community'], date: '2024', video: VIDEOS[11], description: 'A tokenized creative tools platform where artists mint skills, monetize tutorials, and build on-chain fan communities.' },
-  { title: 'Spatial Commerce', badge: 'AR', tags: ['Retail', 'AR'], date: '2025', video: VIDEOS[12], description: 'Shopping reimagined in mixed reality — try on clothes, arrange furniture, and complete purchases without leaving AR mode.' },
-  { title: 'Biotech Viz Platform', badge: 'SCIENCE', tags: ['Biology', 'Viz'], date: '2024', video: VIDEOS[13], description: 'A molecular rendering engine capable of visualizing protein folding simulations at cellular resolution in the browser.' },
-  { title: 'Urban Intelligence', badge: 'SMART', tags: ['City', 'IoT'], date: '2025', video: VIDEOS[0], description: 'A connected city framework synchronizing 50,000+ IoT sensors to optimize energy, traffic, and emergency response in real time.' },
-  { title: 'Generative Fashion', badge: 'FASHION', tags: ['AI', 'Design'], date: '2024', video: VIDEOS[1], description: 'An algorithmic couture system producing unique garment patterns from climate data, emotion states, and cultural archives.' },
-]
+// Data pools for randomizing 29 unique cards
+const PLATFORMS = ['INSTAGRAM', 'TIKTOK', 'YOUTUBE SHORTS', 'X / TWITTER', 'BEHANCE']
+const USERNAMES = ['@kevin_xtreme', '@ai_influencer', '@digital_nomad', '@synth_athlete', '@future_creator']
+const ROLES = ['EXTREME BASEJUMPER', 'PROFESSIONAL ANGLER', 'WINTER ATHLETE', 'HEAVY LIFTER', 'SKY DIVER', 'DEEP SEA EXPLORER', 'URBAN ACROBAT', 'MOUNTAINEER']
+const LOCATIONS = ['DOLOMITES, ALPS', 'MALDIVES REEF', 'SAHARA DUNES', 'NEO-TOKYO', 'GRAND CANYON', 'MT. EVEREST', 'PACIFIC OCEAN', 'DUBAI SKYSCRAPER']
+
+// Generate 29 unique cards to outnumber the 5x5 (25) grid cluster, avoiding visible duplicates!
+const CARD_DATA: CardData[] = Array.from({ length: 29 }).map((_, i) => ({
+  title: PLATFORMS[i % PLATFORMS.length], // Top Left
+  badge: USERNAMES[(i + 3) % USERNAMES.length], // Top Right
+  tags: [ROLES[(i + 2) % ROLES.length]], // Bottom Left (rendered with joins if multiple)
+  date: LOCATIONS[(i + 5) % LOCATIONS.length], // Bottom Right
+  video: VIDEOS[i % VIDEOS.length], 
+  description: 'A versatile AI-generated digital identity seamlessly adapting to extreme environments and roles.'
+}))
 
 const GRID_OPTIONS: Partial<InfiniteGridOptions> = {
   gridCols: 5,
   gridRows: 5,
-  tileSize: 2.4,
-  gridGap: 0.06,
-  baseCameraZ: 13.5, // Straightforward pull back to see more grid items
+  tileSize: 2.6, // Made tiles slightly larger for better presence
+  gridGap: 0.08, // Increased gap slightly
+  baseCameraZ: 9.5, // Zoomed in significantly (from 13.5) to see fewer cards
   enablePostProcessing: true,
   postProcessParams: {
-    distortionIntensity: -0.15, // Reverted to subtle concavity
+    distortionIntensity: -0.18, // Slightly stronger curve to wrap the fewer items nicely
     vignetteOffset: 0.0,
     vignetteDarkness: 0.55,
   },
