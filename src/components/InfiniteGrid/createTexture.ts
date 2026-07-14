@@ -41,32 +41,30 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
 }
 
 function extractDominantColor(media: HTMLImageElement | HTMLVideoElement): [number, number, number] {
-  const size = 64
-  const cvs = document.createElement('canvas')
-  cvs.width = size; cvs.height = size
-  const ctx = cvs.getContext('2d')!
+  try {
+    const size = 64
+    const cvs = document.createElement('canvas')
+    cvs.width = size; cvs.height = size
+    const ctx = cvs.getContext('2d')!
 
-  const mw = media instanceof HTMLVideoElement ? media.videoWidth : media.width
-  const mh = media instanceof HTMLVideoElement ? media.videoHeight : media.height
+    const mw = media instanceof HTMLVideoElement ? media.videoWidth : media.width
+    const mh = media instanceof HTMLVideoElement ? media.videoHeight : media.height
 
-  if (!mw || !mh) return [0.1, 0.1, 0.1]
+    if (!mw || !mh) return [0.1, 0.1, 0.1]
 
-  const ar = mw / mh
-  let sx = 0, sy = 0, sw = mw, sh = mh
-  if (ar > 1) { sw = mh; sx = (mw - sw) / 2 }
-  else        { sh = mw; sy = (mh - sh) / 2 }
-  
-  ctx.drawImage(media, sx, sy, sw, sh, 0, 0, size, size)
+    ctx.drawImage(media, 0, 0, size, size)
+    const d = ctx.getImageData(0, 0, size, size).data
+    let r = 0, g = 0, b = 0, n = 0
+    for (let i = 0; i < d.length; i += 4) {
+      r += d[i]; g += d[i + 1]; b += d[i + 2]; n++
+    }
 
-  const d = ctx.getImageData(0, 0, size, size).data
-  let r = 0, g = 0, b = 0, n = 0
-  for (let i = 0; i < d.length; i += 4) {
-    r += d[i]; g += d[i + 1]; b += d[i + 2]; n++
+    const [h, s] = rgbToHsl(r / n / 255, g / n / 255, b / n / 255)
+    if (s < 0.08) return [0.10, 0.10, 0.10]
+    return hslToRgb(h, 0.55, 0.18)
+  } catch {
+    return [0.1, 0.1, 0.1]
   }
-
-  const [h, s] = rgbToHsl(r / n / 255, g / n / 255, b / n / 255)
-  if (s < 0.08) return [0.10, 0.10, 0.10]
-  return hslToRgb(h, 0.55, 0.18)
 }
 
 export function createForegroundTexture(
@@ -75,6 +73,7 @@ export function createForegroundTexture(
   w = 512,
   h = 910,
 ): TextureResult {
+  // ── UI Canvas (Text overlay) ──────────────────────────────────────────────
   const scale = 2
   const cvs = document.createElement('canvas')
   cvs.width = w * scale
@@ -84,7 +83,8 @@ export function createForegroundTexture(
 
   ctx.clearRect(0, 0, w, h)
 
-  ctx.strokeStyle = 'rgba(255,255,255,0.06)'
+  // Subtle white border
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)'
   ctx.lineWidth = 1
   ctx.strokeRect(0.5, 0.5, w - 1, h - 1)
 
@@ -92,7 +92,23 @@ export function createForegroundTexture(
   const MARGIN_TOP = 52
   const MARGIN_BOTTOM = 52
 
-  ctx.font = `600 24px ${FONT_BASE}`
+  // Draw a subtle gradient overlay at top and bottom so text is readable
+  // Top gradient
+  const topGrad = ctx.createLinearGradient(0, 0, 0, MARGIN_TOP + 24)
+  topGrad.addColorStop(0, 'rgba(0,0,0,0.7)')
+  topGrad.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = topGrad
+  ctx.fillRect(0, 0, w, MARGIN_TOP + 24)
+
+  // Bottom gradient
+  const botGrad = ctx.createLinearGradient(0, h - MARGIN_BOTTOM - 24, 0, h)
+  botGrad.addColorStop(0, 'rgba(0,0,0,0)')
+  botGrad.addColorStop(1, 'rgba(0,0,0,0.7)')
+  ctx.fillStyle = botGrad
+  ctx.fillRect(0, h - MARGIN_BOTTOM - 24, w, MARGIN_BOTTOM + 24)
+
+  // Text
+  ctx.font = `600 22px ${FONT_BASE}`
   ctx.fillStyle = 'rgba(255,255,255,1)'
   if ('letterSpacing' in ctx) {
     ;(ctx as any).letterSpacing = '1px'
@@ -106,7 +122,7 @@ export function createForegroundTexture(
   ctx.fillText(card.badge.toUpperCase(), w - PAD - 8, MARGIN_TOP / 2)
 
   ctx.textAlign = 'left'
-  const tagsText = card.tags.join('   ·   ').toUpperCase()
+  const tagsText = card.tags.join('  ·  ').toUpperCase()
   ctx.fillText(tagsText, PAD + 8, h - MARGIN_BOTTOM / 2)
 
   ctx.textAlign = 'right'
@@ -119,15 +135,23 @@ export function createForegroundTexture(
     magFilter: gl.LINEAR,
   })
 
-  const emptyCvs = document.createElement('canvas')
-  emptyCvs.width = 2; emptyCvs.height = 2
-  emptyCvs.getContext('2d')!.fillRect(0,0,2,2) // black fallback
+  // ── Media Texture (Video / Image) ─────────────────────────────────────────
+  // We pre-size the texture to the card dimensions so OGL reserves the
+  // correct GPU memory slot immediately; we upload real data when ready.
+  const mediaCvs = document.createElement('canvas')
+  mediaCvs.width = w
+  mediaCvs.height = h
+  const mctx = mediaCvs.getContext('2d')!
+  mctx.fillStyle = '#111'
+  mctx.fillRect(0, 0, w, h)
 
   const mediaTexture = new OGLTexture(gl, {
-    image: emptyCvs,
-    generateMipmaps: false, // DO NOT generate mipmaps for video, it kills performance
+    image: mediaCvs,
+    generateMipmaps: false, // NEVER use mipmaps on a live video texture
     minFilter: gl.LINEAR,
     magFilter: gl.LINEAR,
+    wrapS: gl.CLAMP_TO_EDGE,
+    wrapT: gl.CLAMP_TO_EDGE,
   })
 
   let dominantColor: [number, number, number] = [0.1, 0.1, 0.1]
@@ -135,37 +159,46 @@ export function createForegroundTexture(
 
   if (card.video) {
     const videoElement = document.createElement('video')
+    // Critical: DO NOT use crossOrigin unless the server actually sends CORS headers
+    // Google Storage does, so we keep it.
     videoElement.crossOrigin = 'Anonymous'
     videoElement.src = card.video
     videoElement.muted = true
     videoElement.loop = true
     videoElement.playsInline = true
-    videoElement.autoplay = true // play immediately for testing
-    videoElement.play().catch(() => {})
 
-    // Make sure we update the texture reference when video has data
-    videoElement.addEventListener('loadeddata', () => {
-      mediaTexture.image = videoElement
+    const onReady = () => {
+      // At this point videoWidth/Height are known and frames are available
+      // Set the video element directly as the OGL texture image
+      mediaTexture.image = videoElement as any
       mediaTexture.needsUpdate = true
-      result.dominantColor = extractDominantColor(videoElement)
-      if (result._colorUniforms) result._colorUniforms.forEach(u => { u.value = result.dominantColor })
-    }, { once: true })
+      result.videoElement = videoElement
+      try {
+        result.dominantColor = extractDominantColor(videoElement)
+        if (result._colorUniforms) result._colorUniforms.forEach(u => { u.value = result.dominantColor })
+      } catch { /* CORS may block color extraction, just skip */ }
+    }
 
-    result.videoElement = videoElement
+    // 'loadeddata' fires when the first frame is decoded and ready
+    videoElement.addEventListener('loadeddata', onReady, { once: true })
+    // Fallback: canplaythrough if loadeddata never fires
+    videoElement.addEventListener('canplaythrough', onReady, { once: true })
+
+    videoElement.load()
+    videoElement.play().catch(() => {
+      // Autoplay blocked — will play when user interacts
+    })
+
   } else if (card.image) {
     const img = new Image()
     img.crossOrigin = 'Anonymous'
     img.src = card.image
     img.onload = () => {
-      mediaTexture.image = img
+      mediaTexture.image = img as any
       mediaTexture.needsUpdate = true
       result.dominantColor = extractDominantColor(img)
       if (result._colorUniforms) result._colorUniforms.forEach(u => { u.value = result.dominantColor })
     }
-  } else {
-    const emptyCvs = document.createElement('canvas')
-    emptyCvs.width = 2; emptyCvs.height = 2
-    mediaTexture.image = emptyCvs
   }
 
   return result

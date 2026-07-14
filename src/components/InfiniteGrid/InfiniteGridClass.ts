@@ -359,9 +359,11 @@ export class InfiniteGridClass {
       }
     }
 
-    // Update playing video textures
+    // Upload current video frame to GPU every frame
     for (const result of this.textureResults) {
-      if (result.videoElement && result.videoElement.readyState >= 2) {
+      const v = result.videoElement
+      if (v && v.readyState >= 2 && !v.paused && !v.ended) {
+        result.mediaTexture.image = v as any
         result.mediaTexture.needsUpdate = true
       }
     }
