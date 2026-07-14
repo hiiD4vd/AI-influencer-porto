@@ -87,7 +87,7 @@ export class InfiniteGridClass {
     this.raycast = new Raycast()
 
     this.TILE_H = this.options.tileSize
-    this.TILE_W = this.TILE_H * (16 / 9)
+    this.TILE_W = this.TILE_H * (9 / 16)
     this.SPACE_X = this.TILE_W + this.options.gridGap
     this.SPACE_Y = this.TILE_H + this.options.gridGap
     this.GRID_W = this.SPACE_X * this.options.gridCols

@@ -118,8 +118,8 @@ function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: n
 export function createForegroundTexture(
   gl: OGLRenderingContext,
   card: CardData,
-  w = 910,
-  h = 512,
+  w = 512,
+  h = 910,
 ): TextureResult {
   const scale = 2
   const cvs = document.createElement('canvas')
