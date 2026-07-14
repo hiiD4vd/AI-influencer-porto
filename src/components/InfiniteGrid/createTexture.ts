@@ -1,18 +1,16 @@
-import type { OGLRenderingContext, Texture } from 'ogl'
 import { Texture as OGLTexture } from 'ogl'
+import type { OGLRenderingContext } from 'ogl'
 import type { CardData } from './types'
 
 const FONT_BASE = `'Inter', -apple-system, sans-serif`
-const FONT_DISPLAY = `'Syne', 'Inter', sans-serif`
 
-/** Result of texture creation — texture + extracted dominant RGB color */
 export interface TextureResult {
-  texture: Texture
-  /** Dominant color [r,g,b] in 0-1 range, extracted from the image */
+  uiTexture: OGLTexture
+  mediaTexture: OGLTexture
+  videoElement?: HTMLVideoElement
   dominantColor: [number, number, number]
+  _colorUniforms?: Array<{value: [number,number,number]}>
 }
-
-// ─── HSL ↔ RGB helpers ──────────────────────────────────────────────────────
 
 function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
   const max = Math.max(r, g, b), min = Math.min(r, g, b)
@@ -42,32 +40,23 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   return [hue2rgb(p, q, h + 1/3), hue2rgb(p, q, h), hue2rgb(p, q, h - 1/3)]
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Extract the dominant hue from an image and re-apply it at a fixed
- * dark, moody luminosity — identical aesthetic to phantom.land.
- *
- * Strategy:
- *   1. Average all pixels to get the scene's mean RGB.
- *   2. Convert to HSL to extract the hue (the "mood" of the image).
- *   3. Re-map to: saturation=0.55, lightness=0.18 → deep, rich, dark color.
- *
- * This prevents washed-out bright colors (e.g. the aurora's harsh cyan)
- * while keeping each tile's hover background feel tonally correct.
- */
-function extractDominantColor(img: HTMLImageElement): [number, number, number] {
+function extractDominantColor(media: HTMLImageElement | HTMLVideoElement): [number, number, number] {
   const size = 64
   const cvs = document.createElement('canvas')
   cvs.width = size; cvs.height = size
   const ctx = cvs.getContext('2d')!
 
-  // Center crop so the subject matters more than letterbox bars
-  const ar = img.width / img.height
-  let sx = 0, sy = 0, sw = img.width, sh = img.height
-  if (ar > 1) { sw = img.height; sx = (img.width - sw) / 2 }
-  else         { sh = img.width;  sy = (img.height - sh) / 2 }
-  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, size, size)
+  const mw = media instanceof HTMLVideoElement ? media.videoWidth : media.width
+  const mh = media instanceof HTMLVideoElement ? media.videoHeight : media.height
+
+  if (!mw || !mh) return [0.1, 0.1, 0.1]
+
+  const ar = mw / mh
+  let sx = 0, sy = 0, sw = mw, sh = mh
+  if (ar > 1) { sw = mh; sx = (mw - sw) / 2 }
+  else        { sh = mw; sy = (mh - sh) / 2 }
+  
+  ctx.drawImage(media, sx, sy, sw, sh, 0, 0, size, size)
 
   const d = ctx.getImageData(0, 0, size, size).data
   let r = 0, g = 0, b = 0, n = 0
@@ -75,46 +64,11 @@ function extractDominantColor(img: HTMLImageElement): [number, number, number] {
     r += d[i]; g += d[i + 1]; b += d[i + 2]; n++
   }
 
-  const rf = r / n / 255
-  const gf = g / n / 255
-  const bf = b / n / 255
-
-  // Extract hue from the average color
-  const [h, s] = rgbToHsl(rf, gf, bf)
-
-  // If the image is nearly grayscale (low saturation), fall back to a
-  // near-neutral dark grey so we don't invent a random hue.
-  if (s < 0.08) {
-    return [0.10, 0.10, 0.10]
-  }
-
-  // Re-apply hue at a fixed dark, moody target:
-  //   Saturation: 0.55  — rich but not neon
-  //   Lightness:  0.18  — dark enough to stay premium/readable
+  const [h, s] = rgbToHsl(r / n / 255, g / n / 255, b / n / 255)
+  if (s < 0.08) return [0.10, 0.10, 0.10]
   return hslToRgb(h, 0.55, 0.18)
 }
 
-// polyfill roundRect
-function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-  ctx.moveTo(x + r, y)
-  ctx.lineTo(x + w - r, y)
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r)
-  ctx.lineTo(x + w, y + h - r)
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
-  ctx.lineTo(x + r, y + h)
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r)
-  ctx.lineTo(x, y + r)
-  ctx.quadraticCurveTo(x, y, x + r, y)
-  ctx.closePath()
-}
-
-/**
- * Generates the foreground (card UI) canvas texture.
- * Returns the texture AND the extracted dominant color.
- *
- * The card canvas uses **alpha = 0 for the background** so the GLSL shader
- * can replace it with the hover color.  Only image pixels and text have alpha > 0.
- */
 export function createForegroundTexture(
   gl: OGLRenderingContext,
   card: CardData,
@@ -128,127 +82,84 @@ export function createForegroundTexture(
   const ctx = cvs.getContext('2d')!
   ctx.scale(scale, scale)
 
-  // ── Start fully transparent — GLSL shader provides the background color ──
   ctx.clearRect(0, 0, w, h)
 
-  // Hairline border (semi-transparent — visible regardless of bg color)
-  ctx.strokeStyle = 'rgba(255,255,255,0.12)'
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)'
   ctx.lineWidth = 1
   ctx.strokeRect(0.5, 0.5, w - 1, h - 1)
-
-  const tex = new OGLTexture(gl, {
-    image: cvs,
-    generateMipmaps: true,
-    minFilter: (gl as WebGLRenderingContext).LINEAR_MIPMAP_LINEAR,
-    magFilter: (gl as WebGLRenderingContext).LINEAR,
-  })
-
-  let dominantColor: [number, number, number] = [0.06, 0.06, 0.06]
 
   const PAD = 16
   const MARGIN_TOP = 52
   const MARGIN_BOTTOM = 52
-  const imageY = MARGIN_TOP
-  const imageH = h - MARGIN_TOP - MARGIN_BOTTOM
 
-  function paintUI(img?: HTMLImageElement) {
-    ctx.clearRect(0, 0, w, h)
-
-    // Border on transparent background
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)'
-    ctx.lineWidth = 1
-    ctx.strokeRect(0.5, 0.5, w - 1, h - 1)
-
-    if (img) {
-      // ── Image ──
-      ctx.save()
-      ctx.beginPath()
-      rr(ctx, PAD, imageY, w - PAD * 2, imageH, 4)
-      ctx.clip()
-      const ar = img.width / img.height
-      const tar = (w - PAD * 2) / imageH
-      let sx = 0, sy = 0, sw = img.width, sh = img.height
-      if (ar > tar) { sw = img.height * tar; sx = (img.width - sw) / 2 }
-      else          { sh = img.width / tar;  sy = (img.height - sh) / 2 }
-      ctx.drawImage(img, sx, sy, sw, sh, PAD, imageY, w - PAD * 2, imageH)
-      ctx.restore()
-    } else {
-      // placeholder shimmer (opaque dark so it's visible)
-      ctx.fillStyle = 'rgba(255,255,255,0.02)'
-      ctx.save(); ctx.beginPath()
-      rr(ctx, PAD, imageY, w - PAD * 2, imageH, 4)
-      ctx.fill(); ctx.restore()
-    }
-
-    // ── 4-Corner Metadata (Phantom.land style) ──
-    ctx.font = `600 24px ${FONT_BASE}`
-    ctx.fillStyle = 'rgba(255,255,255,1)' // Maximum brightness for visibility
-    
-    // Support modern canvas letterSpacing for that premium editorial look
-    if ('letterSpacing' in ctx) {
-      ;(ctx as any).letterSpacing = '1px'
-    }
-
-    // 1. Top-Left: Title
-    ctx.textAlign = 'left'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(card.title.toUpperCase(), PAD + 8, MARGIN_TOP / 2)
-
-    // 2. Top-Right: Brand/Badge
-    ctx.textAlign = 'right'
-    ctx.fillText(card.badge.toUpperCase(), w - PAD - 8, MARGIN_TOP / 2)
-
-    // 3. Bottom-Left: Tags
-    ctx.textAlign = 'left'
-    const tagsText = card.tags.join('   ·   ').toUpperCase()
-    ctx.fillText(tagsText, PAD + 8, h - MARGIN_BOTTOM / 2)
-
-    // 4. Bottom-Right: Date
-    ctx.textAlign = 'right'
-    ctx.fillText(card.date, w - PAD - 8, h - MARGIN_BOTTOM / 2)
-
-    // Reset letterSpacing
-    if ('letterSpacing' in ctx) {
-      ;(ctx as any).letterSpacing = '0px'
-    }
-
-    tex.image = cvs
-    tex.needsUpdate = true
+  ctx.font = `600 24px ${FONT_BASE}`
+  ctx.fillStyle = 'rgba(255,255,255,1)'
+  if ('letterSpacing' in ctx) {
+    ;(ctx as any).letterSpacing = '1px'
   }
 
-  paintUI()
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(card.title.toUpperCase(), PAD + 8, MARGIN_TOP / 2)
 
-  if (card.image) {
+  ctx.textAlign = 'right'
+  ctx.fillText(card.badge.toUpperCase(), w - PAD - 8, MARGIN_TOP / 2)
+
+  ctx.textAlign = 'left'
+  const tagsText = card.tags.join('   ·   ').toUpperCase()
+  ctx.fillText(tagsText, PAD + 8, h - MARGIN_BOTTOM / 2)
+
+  ctx.textAlign = 'right'
+  ctx.fillText(card.date, w - PAD - 8, h - MARGIN_BOTTOM / 2)
+
+  const uiTexture = new OGLTexture(gl, {
+    image: cvs,
+    generateMipmaps: true,
+    minFilter: gl.LINEAR_MIPMAP_LINEAR,
+    magFilter: gl.LINEAR,
+  })
+
+  const mediaTexture = new OGLTexture(gl, {
+    generateMipmaps: true,
+    minFilter: gl.LINEAR_MIPMAP_LINEAR,
+    magFilter: gl.LINEAR,
+  })
+
+  let dominantColor: [number, number, number] = [0.1, 0.1, 0.1]
+  const result: TextureResult = { uiTexture, mediaTexture, dominantColor }
+
+  if (card.video) {
+    const videoElement = document.createElement('video')
+    videoElement.crossOrigin = 'Anonymous'
+    videoElement.src = card.video
+    videoElement.muted = true
+    videoElement.loop = true
+    videoElement.playsInline = true
+    videoElement.autoplay = true // play immediately for testing
+    videoElement.play().catch(() => {})
+
+    videoElement.addEventListener('canplay', () => {
+      mediaTexture.image = videoElement
+      mediaTexture.needsUpdate = true
+      result.dominantColor = extractDominantColor(videoElement)
+      if (result._colorUniforms) result._colorUniforms.forEach(u => { u.value = result.dominantColor })
+    }, { once: true })
+
+    result.videoElement = videoElement
+  } else if (card.image) {
     const img = new Image()
     img.crossOrigin = 'Anonymous'
     img.src = card.image
     img.onload = () => {
-      dominantColor = extractDominantColor(img)
-      paintUI(img)
+      mediaTexture.image = img
+      mediaTexture.needsUpdate = true
+      result.dominantColor = extractDominantColor(img)
+      if (result._colorUniforms) result._colorUniforms.forEach(u => { u.value = result.dominantColor })
     }
-  }
-
-  // _colorUniforms: list of {value} refs in shader programs that need the live color.
-  // InfiniteGridClass populates this after creating the Program.
-  const result: TextureResult & { _colorUniforms?: Array<{value: [number,number,number]}> } = {
-    texture: tex,
-    dominantColor,
-  }
-
-  if (card.image) {
-    const img = new Image()
-    img.crossOrigin = 'Anonymous'
-    img.src = card.image
-    img.onload = () => {
-      // Extract fresh dominant color from the actual loaded image
-      const liveColor = extractDominantColor(img)
-      result.dominantColor = liveColor
-      // Push to all shader uniforms already registered
-      if (result._colorUniforms) {
-        result._colorUniforms.forEach(u => { u.value = liveColor })
-      }
-      paintUI(img)
-    }
+  } else {
+    const emptyCvs = document.createElement('canvas')
+    emptyCvs.width = 2; emptyCvs.height = 2
+    mediaTexture.image = emptyCvs
   }
 
   return result

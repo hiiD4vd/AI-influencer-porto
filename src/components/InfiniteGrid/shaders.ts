@@ -18,25 +18,35 @@ export const tileVertex = /* glsl */`
  * per-image dominant color), exactly replicating the phantom.land effect.
  * map.a = 1 means a painted pixel (image/text), 0 means empty card background.
  */
-export const tileFrag = /* glsl */`
+export const tileFrag = /* glsl */ `
   precision highp float;
-  uniform sampler2D map;
+
+  uniform sampler2D tUI;
+  uniform sampler2D tMedia;
   uniform vec3 uHoverColor;
-  uniform float uHoverProgress; // 0 = idle, 1 = fully hovered
+  uniform float uHoverProgress;
+
   varying vec2 vUv;
 
   void main() {
-    vec4 px = texture2D(map, vUv);
+    // UI layer (Text and borders on transparent bg)
+    vec4 ui = texture2D(tUI, vUv);
+    
+    // Media layer (Video or Image)
+    vec4 media = texture2D(tMedia, vUv);
 
-    // Base card — near-black
-    vec3 baseBg = vec3(0.055); // #0e0e0e
+    // Phantom.land / Premium style: 
+    // Video is slightly dimmed when idle, pops to full brightness on hover
+    vec3 mediaDark = mix(media.rgb, vec3(0.02), 0.4); // darkened by 40%
+    
+    // As it hovers, we also tint it slightly with the dominant color for mood
+    vec3 hoverTint = mix(media.rgb, uHoverColor, 0.3);
+    
+    vec3 mediaColor = mix(mediaDark, hoverTint, uHoverProgress);
 
-    // Lerp toward the card's extracted dark-moody color on hover.
-    // Cap at 0.82 so there's always a dark undertone — never fully saturated.
-    vec3 hoveredBg = mix(baseBg, uHoverColor, uHoverProgress * 0.82);
-
-    // Painted pixels (image / text / tags) sit on top of the background
-    vec3 finalColor = mix(hoveredBg, px.rgb, px.a);
+    // UI overlays on top of the media.
+    // ui.a is 1.0 for text/borders, 0.0 for the transparent center.
+    vec3 finalColor = mix(mediaColor, ui.rgb, ui.a);
 
     gl_FragColor = vec4(finalColor, 1.0);
   }

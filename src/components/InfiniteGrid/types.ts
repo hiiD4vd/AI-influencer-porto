@@ -5,6 +5,7 @@ export interface CardData {
   tags: string[]
   date: string
   image?: string
+  video?: string
 }
 
 export interface PostProcessParams {

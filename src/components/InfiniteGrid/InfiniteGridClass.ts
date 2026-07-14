@@ -6,6 +6,7 @@ import {
 import { gsap } from 'gsap'
 import { tileVertex, tileFrag, postVertex, postFrag } from './shaders'
 import { createForegroundTexture } from './createTexture'
+import type { TextureResult } from './createTexture'
 import { defaultOptions } from './types'
 import type { CardData, InfiniteGridOptions, TileGroupData } from './types'
 
@@ -36,6 +37,8 @@ export class InfiniteGridClass {
   private fgMeshMap = new Map<string, Mesh>()
   // dominant color per tileKey (for hover shader)
   private dominantColors = new Map<string, [number, number, number]>()
+  
+  private textureResults: TextureResult[] = []
 
   private scrollX = 0
   private scrollY = 0
@@ -119,10 +122,8 @@ export class InfiniteGridClass {
   }
 
   private buildGrid() {
-    // Generate textures per unique card — store dominant color too
-    const fgResults = this.cardData.map(card => createForegroundTexture(this.gl, card))
-    // Default dominant colors — updated async as images load
-    const cardDominant: Array<[number, number, number]> = fgResults.map(r => r.dominantColor)
+    this.textureResults = this.cardData.map(card => createForegroundTexture(this.gl, card))
+    const cardDominant: Array<[number, number, number]> = this.textureResults.map(r => r.dominantColor)
 
     let idx = 0
     for (let row = -1; row <= 1; row++) {
@@ -152,7 +153,8 @@ export class InfiniteGridClass {
               vertex: tileVertex,
               fragment: tileFrag,
               uniforms: {
-                map:            { value: fgResults[cardIdx].texture },
+                tUI:            { value: this.textureResults[cardIdx].uiTexture },
+                tMedia:         { value: this.textureResults[cardIdx].mediaTexture },
                 uHoverColor:    { value: [...dc] as [number,number,number] },
                 uHoverProgress: { value: 0 },
               },
@@ -168,7 +170,7 @@ export class InfiniteGridClass {
             this.fgMeshMap.set(tileKey, mesh)
 
             // Register this uniform so createTexture can push live color when image loads
-            const result = fgResults[cardIdx] as any
+            const result = this.textureResults[cardIdx]
             result._colorUniforms = result._colorUniforms ?? []
             result._colorUniforms.push(prog.uniforms.uHoverColor)
 
@@ -354,6 +356,13 @@ export class InfiniteGridClass {
       if (Math.abs(this.inertiaX) < 0.0001 && Math.abs(this.inertiaY) < 0.0001) {
         this.inertiaX = 0; this.inertiaY = 0
         this.hasInertia = false
+      }
+    }
+
+    // Update playing video textures
+    for (const result of this.textureResults) {
+      if (result.videoElement && result.videoElement.readyState >= 2) {
+        result.mediaTexture.needsUpdate = true
       }
     }
 
