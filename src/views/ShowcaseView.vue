@@ -57,7 +57,12 @@ const VIDEOS = [
   '/videos/opt_rb_kepin-alt-dolomites-basejump_20260704.mp4',
   '/videos/opt_rb_kepin_balloon-rig-sunrise_20260629.mp4',
   '/videos/opt_rb_kepin_reef-barhang_20260704.mp4',
-  '/videos/opt_rb_kepin_skydive-reef_20260626.mp4'
+  '/videos/opt_rb_kepin_skydive-reef_20260626.mp4',
+  '/videos/opt_ATLAS STONE.mp4',
+  '/videos/opt_fish_kepin-sub-gt-001_20260702.mp4',
+  '/videos/opt_rb_kepin_freesolo-halfdome_20260625.mp4',
+  '/videos/opt_rb_kepin_snowboard-sunset_20260626.mp4',
+  '/videos/opt_TRUCK TIRE.mp4'
 ]
 
 const CARD_DATA: CardData[] = [
@@ -70,13 +75,13 @@ const CARD_DATA: CardData[] = [
   { title: 'Tech Review Network', badge: 'MEDIA', tags: ['Review', 'Tech'], date: '2025', video: VIDEOS[6], description: 'An automated review pipeline ingesting 800+ gadgets per month, generating expert-quality editorial content through fine-tuned LLMs.' },
   { title: 'Visitor Experience', badge: 'UX', tags: ['Museum', 'Interactive'], date: '2024', video: VIDEOS[7], description: 'A multi-sensory journey design for a major natural history museum, merging AR overlays with physical exhibits.' },
   { title: 'Data Visualization OS', badge: 'DATA', tags: ['Analytics', 'Dashboard'], date: '2025', video: VIDEOS[8], description: 'A real-time intelligence operating system for Fortune 500 analytics teams, rendering 2M+ data points at 120fps via WebGPU.' },
-  { title: 'Sonic Brand System', badge: 'AUDIO', tags: ['Branding', 'Sound'], date: '2024', video: VIDEOS[0], description: 'A multisensory brand identity framework incorporating procedurally generated audio signatures for digital and physical touchpoints.' },
-  { title: 'Climate AI Monitor', badge: 'ESG', tags: ['Climate', 'Data'], date: '2025', video: VIDEOS[1], description: 'A planetary intelligence system aggregating satellite feeds, IoT sensors, and climate models into a single predictive dashboard.' },
-  { title: 'Creator Economy Hub', badge: 'WEB3', tags: ['NFT', 'Community'], date: '2024', video: VIDEOS[2], description: 'A tokenized creative tools platform where artists mint skills, monetize tutorials, and build on-chain fan communities.' },
-  { title: 'Spatial Commerce', badge: 'AR', tags: ['Retail', 'AR'], date: '2025', video: VIDEOS[3], description: 'Shopping reimagined in mixed reality — try on clothes, arrange furniture, and complete purchases without leaving AR mode.' },
-  { title: 'Biotech Viz Platform', badge: 'SCIENCE', tags: ['Biology', 'Viz'], date: '2024', video: VIDEOS[4], description: 'A molecular rendering engine capable of visualizing protein folding simulations at cellular resolution in the browser.' },
-  { title: 'Urban Intelligence', badge: 'SMART', tags: ['City', 'IoT'], date: '2025', video: VIDEOS[5], description: 'A connected city framework synchronizing 50,000+ IoT sensors to optimize energy, traffic, and emergency response in real time.' },
-  { title: 'Generative Fashion', badge: 'FASHION', tags: ['AI', 'Design'], date: '2024', video: VIDEOS[6], description: 'An algorithmic couture system producing unique garment patterns from climate data, emotion states, and cultural archives.' },
+  { title: 'Sonic Brand System', badge: 'AUDIO', tags: ['Branding', 'Sound'], date: '2024', video: VIDEOS[9], description: 'A multisensory brand identity framework incorporating procedurally generated audio signatures for digital and physical touchpoints.' },
+  { title: 'Climate AI Monitor', badge: 'ESG', tags: ['Climate', 'Data'], date: '2025', video: VIDEOS[10], description: 'A planetary intelligence system aggregating satellite feeds, IoT sensors, and climate models into a single predictive dashboard.' },
+  { title: 'Creator Economy Hub', badge: 'WEB3', tags: ['NFT', 'Community'], date: '2024', video: VIDEOS[11], description: 'A tokenized creative tools platform where artists mint skills, monetize tutorials, and build on-chain fan communities.' },
+  { title: 'Spatial Commerce', badge: 'AR', tags: ['Retail', 'AR'], date: '2025', video: VIDEOS[12], description: 'Shopping reimagined in mixed reality — try on clothes, arrange furniture, and complete purchases without leaving AR mode.' },
+  { title: 'Biotech Viz Platform', badge: 'SCIENCE', tags: ['Biology', 'Viz'], date: '2024', video: VIDEOS[13], description: 'A molecular rendering engine capable of visualizing protein folding simulations at cellular resolution in the browser.' },
+  { title: 'Urban Intelligence', badge: 'SMART', tags: ['City', 'IoT'], date: '2025', video: VIDEOS[0], description: 'A connected city framework synchronizing 50,000+ IoT sensors to optimize energy, traffic, and emergency response in real time.' },
+  { title: 'Generative Fashion', badge: 'FASHION', tags: ['AI', 'Design'], date: '2024', video: VIDEOS[1], description: 'An algorithmic couture system producing unique garment patterns from climate data, emotion states, and cultural archives.' },
 ]
 
 const GRID_OPTIONS: Partial<InfiniteGridOptions> = {
