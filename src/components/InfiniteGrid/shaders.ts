@@ -33,7 +33,11 @@ export const tileFrag = /* glsl */ `
     vec4 ui = texture2D(tUI, vUv);
     
     // Media layer (Video or Image)
-    vec4 media = texture2D(tMedia, vUv);
+    // object-fit: cover calculation for 16:9 video inside 9:16 card
+    // (9/16) / (16/9) = 81/256 = 0.3164
+    vec2 vidUv = vUv;
+    vidUv.x = (vUv.x - 0.5) * 0.3164 + 0.5;
+    vec4 media = texture2D(tMedia, vidUv);
 
     // Phantom.land / Premium style: 
     // Video is slightly dimmed when idle, pops to full brightness on hover

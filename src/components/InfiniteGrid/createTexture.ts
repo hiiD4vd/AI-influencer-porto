@@ -119,9 +119,14 @@ export function createForegroundTexture(
     magFilter: gl.LINEAR,
   })
 
+  const emptyCvs = document.createElement('canvas')
+  emptyCvs.width = 2; emptyCvs.height = 2
+  emptyCvs.getContext('2d')!.fillRect(0,0,2,2) // black fallback
+
   const mediaTexture = new OGLTexture(gl, {
-    generateMipmaps: true,
-    minFilter: gl.LINEAR_MIPMAP_LINEAR,
+    image: emptyCvs,
+    generateMipmaps: false, // DO NOT generate mipmaps for video, it kills performance
+    minFilter: gl.LINEAR,
     magFilter: gl.LINEAR,
   })
 
@@ -138,7 +143,8 @@ export function createForegroundTexture(
     videoElement.autoplay = true // play immediately for testing
     videoElement.play().catch(() => {})
 
-    videoElement.addEventListener('canplay', () => {
+    // Make sure we update the texture reference when video has data
+    videoElement.addEventListener('loadeddata', () => {
       mediaTexture.image = videoElement
       mediaTexture.needsUpdate = true
       result.dominantColor = extractDominantColor(videoElement)

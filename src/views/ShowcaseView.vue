@@ -48,7 +48,7 @@ import type { CardData, InfiniteGridOptions } from '../components/InfiniteGrid/t
 
 const activeTile = ref<CardData | null>(null)
 
-const SAMPLE_VIDEO = 'https://filesamples.com/samples/video/mp4/sample_1080x1920.mp4'
+const SAMPLE_VIDEO = 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4'
 
 const CARD_DATA: CardData[] = [
   { title: 'AI Influencer Platform', badge: 'AI', tags: ['Machine Learning', 'Web3'], date: '2025', video: SAMPLE_VIDEO, description: 'A next-generation platform for AI-driven content creators, enabling autonomous brand partnerships and viral campaign orchestration at scale.' },
