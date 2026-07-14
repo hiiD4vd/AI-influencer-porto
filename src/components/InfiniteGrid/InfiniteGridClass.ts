@@ -342,6 +342,24 @@ export class InfiniteGridClass {
     if (this.postMesh) this.postMesh.program.uniforms.uResolution.value = [W, H]
   }
 
+  private uploadVideoFrames() {
+    for (const result of this.textureResults) {
+      const v = result.videoElement
+      const vCtx = result.videoCtx
+      const vCvs = result.videoCanvas
+      if (!v || !vCtx || !vCvs || v.readyState < 2) continue
+      // Draw current video frame into the proxy canvas (cover-crop)
+      const vw = v.videoWidth || 1, vh = v.videoHeight || 1
+      const cw = vCvs.width, ch = vCvs.height
+      const scale = Math.max(cw / vw, ch / vh)
+      const dw = vw * scale, dh = vh * scale
+      const dx = (cw - dw) / 2, dy = (ch - dh) / 2
+      vCtx.drawImage(v, dx, dy, dw, dh)
+      // Upload canvas pixels to GPU
+      result.mediaTexture.needsUpdate = true
+    }
+  }
+
   private loop() {
     this.afId = requestAnimationFrame(() => this.loop())
 
@@ -359,14 +377,7 @@ export class InfiniteGridClass {
       }
     }
 
-    // Upload current video frame to GPU every frame
-    for (const result of this.textureResults) {
-      const v = result.videoElement
-      if (v && v.readyState >= 2 && !v.paused && !v.ended) {
-        result.mediaTexture.image = v as any
-        result.mediaTexture.needsUpdate = true
-      }
-    }
+    this.uploadVideoFrames()
 
     if (this.options.enablePostProcessing && this.sceneRT && this.postMesh) {
       this.renderer.render({ scene: this.scene, camera: this.camera, target: this.sceneRT })

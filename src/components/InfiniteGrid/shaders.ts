@@ -32,12 +32,8 @@ export const tileFrag = /* glsl */ `
     // UI layer (Text and borders on transparent bg)
     vec4 ui = texture2D(tUI, vUv);
     
-    // Media layer (Video or Image)
-    // object-fit: cover calculation for 16:9 video inside 9:16 card
-    // (9/16) / (16/9) = 81/256 = 0.3164
-    vec2 vidUv = vUv;
-    vidUv.x = (vUv.x - 0.5) * 0.3164 + 0.5;
-    vec4 media = texture2D(tMedia, vidUv);
+    // Media layer (Video or Image) — cropping is handled by the canvas proxy
+    vec4 media = texture2D(tMedia, vUv);
 
     // Phantom.land / Premium style: 
     // Video is slightly dimmed when idle, pops to full brightness on hover

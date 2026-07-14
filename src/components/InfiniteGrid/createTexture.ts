@@ -7,6 +7,9 @@ const FONT_BASE = `'Inter', -apple-system, sans-serif`
 export interface TextureResult {
   uiTexture: OGLTexture
   mediaTexture: OGLTexture
+  /** The proxy canvas that gets video frames drawn into it each frame */
+  videoCanvas?: HTMLCanvasElement
+  videoCtx?: CanvasRenderingContext2D
   videoElement?: HTMLVideoElement
   dominantColor: [number, number, number]
   _colorUniforms?: Array<{value: [number,number,number]}>
@@ -40,25 +43,14 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   return [hue2rgb(p, q, h + 1/3), hue2rgb(p, q, h), hue2rgb(p, q, h - 1/3)]
 }
 
-function extractDominantColor(media: HTMLImageElement | HTMLVideoElement): [number, number, number] {
+function extractDominantColor(cvs: HTMLCanvasElement): [number, number, number] {
   try {
-    const size = 64
-    const cvs = document.createElement('canvas')
-    cvs.width = size; cvs.height = size
     const ctx = cvs.getContext('2d')!
-
-    const mw = media instanceof HTMLVideoElement ? media.videoWidth : media.width
-    const mh = media instanceof HTMLVideoElement ? media.videoHeight : media.height
-
-    if (!mw || !mh) return [0.1, 0.1, 0.1]
-
-    ctx.drawImage(media, 0, 0, size, size)
-    const d = ctx.getImageData(0, 0, size, size).data
+    const d = ctx.getImageData(0, 0, cvs.width, cvs.height).data
     let r = 0, g = 0, b = 0, n = 0
     for (let i = 0; i < d.length; i += 4) {
       r += d[i]; g += d[i + 1]; b += d[i + 2]; n++
     }
-
     const [h, s] = rgbToHsl(r / n / 255, g / n / 255, b / n / 255)
     if (s < 0.08) return [0.10, 0.10, 0.10]
     return hslToRgb(h, 0.55, 0.18)
@@ -73,132 +65,113 @@ export function createForegroundTexture(
   w = 512,
   h = 910,
 ): TextureResult {
-  // ── UI Canvas (Text overlay) ──────────────────────────────────────────────
+  // ── UI Canvas (Text overlay, semi-transparent) ────────────────────────────
   const scale = 2
-  const cvs = document.createElement('canvas')
-  cvs.width = w * scale
-  cvs.height = h * scale
-  const ctx = cvs.getContext('2d')!
+  const uiCvs = document.createElement('canvas')
+  uiCvs.width = w * scale
+  uiCvs.height = h * scale
+  const ctx = uiCvs.getContext('2d')!
   ctx.scale(scale, scale)
-
   ctx.clearRect(0, 0, w, h)
-
-  // Subtle white border
-  ctx.strokeStyle = 'rgba(255,255,255,0.08)'
-  ctx.lineWidth = 1
-  ctx.strokeRect(0.5, 0.5, w - 1, h - 1)
 
   const PAD = 16
   const MARGIN_TOP = 52
   const MARGIN_BOTTOM = 52
 
-  // Draw a subtle gradient overlay at top and bottom so text is readable
-  // Top gradient
-  const topGrad = ctx.createLinearGradient(0, 0, 0, MARGIN_TOP + 24)
-  topGrad.addColorStop(0, 'rgba(0,0,0,0.7)')
+  // Gradient overlays so text is readable over any video
+  const topGrad = ctx.createLinearGradient(0, 0, 0, MARGIN_TOP + 40)
+  topGrad.addColorStop(0, 'rgba(0,0,0,0.75)')
   topGrad.addColorStop(1, 'rgba(0,0,0,0)')
   ctx.fillStyle = topGrad
-  ctx.fillRect(0, 0, w, MARGIN_TOP + 24)
+  ctx.fillRect(0, 0, w, MARGIN_TOP + 40)
 
-  // Bottom gradient
-  const botGrad = ctx.createLinearGradient(0, h - MARGIN_BOTTOM - 24, 0, h)
+  const botGrad = ctx.createLinearGradient(0, h - MARGIN_BOTTOM - 40, 0, h)
   botGrad.addColorStop(0, 'rgba(0,0,0,0)')
-  botGrad.addColorStop(1, 'rgba(0,0,0,0.7)')
+  botGrad.addColorStop(1, 'rgba(0,0,0,0.75)')
   ctx.fillStyle = botGrad
-  ctx.fillRect(0, h - MARGIN_BOTTOM - 24, w, MARGIN_BOTTOM + 24)
+  ctx.fillRect(0, h - MARGIN_BOTTOM - 40, w, MARGIN_BOTTOM + 40)
 
-  // Text
+  // Subtle border
+  ctx.strokeStyle = 'rgba(255,255,255,0.10)'
+  ctx.lineWidth = 1
+  ctx.strokeRect(0.5, 0.5, w - 1, h - 1)
+
   ctx.font = `600 22px ${FONT_BASE}`
   ctx.fillStyle = 'rgba(255,255,255,1)'
-  if ('letterSpacing' in ctx) {
-    ;(ctx as any).letterSpacing = '1px'
-  }
+  if ('letterSpacing' in ctx) ;(ctx as any).letterSpacing = '1px'
 
-  ctx.textAlign = 'left'
-  ctx.textBaseline = 'middle'
+  ctx.textAlign = 'left';  ctx.textBaseline = 'middle'
   ctx.fillText(card.title.toUpperCase(), PAD + 8, MARGIN_TOP / 2)
-
   ctx.textAlign = 'right'
   ctx.fillText(card.badge.toUpperCase(), w - PAD - 8, MARGIN_TOP / 2)
-
   ctx.textAlign = 'left'
-  const tagsText = card.tags.join('  ·  ').toUpperCase()
-  ctx.fillText(tagsText, PAD + 8, h - MARGIN_BOTTOM / 2)
-
+  ctx.fillText(card.tags.join('  ·  ').toUpperCase(), PAD + 8, h - MARGIN_BOTTOM / 2)
   ctx.textAlign = 'right'
   ctx.fillText(card.date, w - PAD - 8, h - MARGIN_BOTTOM / 2)
 
   const uiTexture = new OGLTexture(gl, {
-    image: cvs,
+    image: uiCvs,
     generateMipmaps: true,
     minFilter: gl.LINEAR_MIPMAP_LINEAR,
     magFilter: gl.LINEAR,
   })
 
-  // ── Media Texture (Video / Image) ─────────────────────────────────────────
-  // We pre-size the texture to the card dimensions so OGL reserves the
-  // correct GPU memory slot immediately; we upload real data when ready.
+  // ── Media Proxy Canvas ────────────────────────────────────────────────────
+  // Instead of assigning an HTMLVideoElement directly to OGL (unreliable),
+  // we use a plain canvas as the GPU texture source.
+  // Each frame the render loop calls videoCtx.drawImage(videoElement) → this
+  // canvas → then sets needsUpdate = true. Canvas → WebGL always works.
   const mediaCvs = document.createElement('canvas')
   mediaCvs.width = w
   mediaCvs.height = h
-  const mctx = mediaCvs.getContext('2d')!
-  mctx.fillStyle = '#111'
-  mctx.fillRect(0, 0, w, h)
+  const mediaCvsCtx = mediaCvs.getContext('2d')!
+  mediaCvsCtx.fillStyle = '#0a0a0a'
+  mediaCvsCtx.fillRect(0, 0, w, h)
 
   const mediaTexture = new OGLTexture(gl, {
     image: mediaCvs,
-    generateMipmaps: false, // NEVER use mipmaps on a live video texture
+    generateMipmaps: false,
     minFilter: gl.LINEAR,
     magFilter: gl.LINEAR,
     wrapS: gl.CLAMP_TO_EDGE,
     wrapT: gl.CLAMP_TO_EDGE,
   })
 
-  let dominantColor: [number, number, number] = [0.1, 0.1, 0.1]
-  const result: TextureResult = { uiTexture, mediaTexture, dominantColor }
+  const result: TextureResult = {
+    uiTexture,
+    mediaTexture,
+    videoCanvas: mediaCvs,
+    videoCtx: mediaCvsCtx,
+    dominantColor: [0.1, 0.1, 0.1],
+  }
 
   if (card.video) {
-    const videoElement = document.createElement('video')
-    // Critical: DO NOT use crossOrigin unless the server actually sends CORS headers
-    // Google Storage does, so we keep it.
-    videoElement.crossOrigin = 'Anonymous'
-    videoElement.src = card.video
-    videoElement.muted = true
-    videoElement.loop = true
-    videoElement.playsInline = true
+    const video = document.createElement('video')
+    video.crossOrigin = 'anonymous'
+    video.src = card.video
+    video.muted = true
+    video.loop = true
+    video.playsInline = true
+    video.preload = 'auto'
 
-    const onReady = () => {
-      // At this point videoWidth/Height are known and frames are available
-      // Set the video element directly as the OGL texture image
-      mediaTexture.image = videoElement as any
-      mediaTexture.needsUpdate = true
-      result.videoElement = videoElement
-      try {
-        result.dominantColor = extractDominantColor(videoElement)
-        if (result._colorUniforms) result._colorUniforms.forEach(u => { u.value = result.dominantColor })
-      } catch { /* CORS may block color extraction, just skip */ }
-    }
+    result.videoElement = video
 
-    // 'loadeddata' fires when the first frame is decoded and ready
-    videoElement.addEventListener('loadeddata', onReady, { once: true })
-    // Fallback: canplaythrough if loadeddata never fires
-    videoElement.addEventListener('canplaythrough', onReady, { once: true })
+    video.addEventListener('canplay', () => {
+      video.play().catch(() => {})
+    }, { once: true })
 
-    videoElement.load()
-    videoElement.play().catch(() => {
-      // Autoplay blocked — will play when user interacts
-    })
+    video.load()
 
   } else if (card.image) {
     const img = new Image()
-    img.crossOrigin = 'Anonymous'
-    img.src = card.image
+    img.crossOrigin = 'anonymous'
     img.onload = () => {
-      mediaTexture.image = img as any
+      mediaCvsCtx.drawImage(img, 0, 0, w, h)
       mediaTexture.needsUpdate = true
-      result.dominantColor = extractDominantColor(img)
-      if (result._colorUniforms) result._colorUniforms.forEach(u => { u.value = result.dominantColor })
+      result.dominantColor = extractDominantColor(mediaCvs)
+      result._colorUniforms?.forEach(u => { u.value = result.dominantColor })
     }
+    img.src = card.image
   }
 
   return result
