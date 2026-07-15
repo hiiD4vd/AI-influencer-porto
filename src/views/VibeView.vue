@@ -7,8 +7,8 @@
       <RouterLink to="/vibe" class="nav-link" :class="{ active: $route.name === 'vibe' }">Vibe</RouterLink>
     </nav>
 
-    <!-- Fixed canvas for image sequence -->
-    <canvas ref="canvasEl" class="hero-canvas" :class="{ hidden: showCarousel }"></canvas>
+    <!-- Canvas — always visible until fully replaced -->
+    <canvas ref="canvasEl" class="hero-canvas"></canvas>
 
     <!-- Loading overlay -->
     <Transition name="fade">
@@ -20,54 +20,43 @@
       </div>
     </Transition>
 
-    <!-- Scroll container for image sequence -->
-    <div class="scroll-container" ref="scrollContainer" :class="{ hidden: showCarousel }"></div>
+    <!-- Scroll container -->
+    <div class="scroll-container" ref="scrollContainer" v-show="!showCarousel"></div>
 
-    <!-- Portal Carousel — appears after last frame -->
-    <Transition name="carousel-appear">
-      <div v-if="showCarousel" class="carousel-scene">
+    <!-- Carousel scene — mounts on top of canvas, card starts at EXACT canvas position -->
+    <div class="carousel-scene" v-show="showCarousel" ref="carouselScene">
 
-        <!-- Back button -->
-        <button class="back-btn" @click="goBack">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-            <path d="M19 12H5M5 12L12 19M5 12L12 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-          </svg>
-        </button>
+      <!-- Back button -->
+      <button class="back-btn" @click="goBack" v-show="showCarousel">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <path d="M19 12H5M5 12L12 19M5 12L12 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
 
-        <!-- Hint text -->
-        <p class="hint-text" :class="{ hidden: isZoomed }">Click a card to enter</p>
+      <!-- Hint -->
+      <p class="hint-text" :style="{ opacity: isZoomed ? 0 : 1 }">Click a card to enter</p>
 
-        <!-- Cards wrapper -->
-        <div class="cards-track" ref="cardsTrack">
-          <div
-            v-for="(card, i) in CARDS"
-            :key="card.id"
-            class="card-slot"
-            :class="{ active: activeCard === i, zooming: activeCard === i && isZoomed }"
-            @click="enterCard(i)"
-            ref="cardSlots"
-          >
-            <!-- Room image — positioned behind to show through the hole -->
-            <div class="room-layer">
-              <img :src="card.room" class="room-img" :alt="card.label" draggable="false" />
-            </div>
-
-            <!-- Card frame on top with transparent hole -->
-            <img src="/images/idcard polos.png" class="card-frame" draggable="false" />
-
-            <!-- Label below card -->
-            <div class="card-label">
-              <span class="card-role">{{ card.label }}</span>
-              <span class="card-cat">{{ card.category }}</span>
-            </div>
+      <!-- Cards track — uses CSS transform to slide siblings in -->
+      <div class="cards-track" ref="cardsTrack">
+        <div
+          v-for="(card, i) in CARDS"
+          :key="card.id"
+          class="card-slot"
+          :ref="el => { if (el) cardEls[i] = el as HTMLElement }"
+          @click="enterCard(i)"
+        >
+          <!-- Room behind the hole -->
+          <div class="room-layer">
+            <img :src="card.room" class="room-img" draggable="false" />
           </div>
+          <!-- Card frame with transparent hole on top -->
+          <img src="/images/idcard polos.png" class="card-frame" draggable="false" />
         </div>
-
       </div>
-    </Transition>
+    </div>
 
-    <!-- Portal zoom overlay — full screen room reveal -->
-    <div class="portal-overlay" ref="portalOverlay" v-show="isZoomed">
+    <!-- Portal overlay for zoom-into-room effect -->
+    <div class="portal-overlay" ref="portalOverlay">
       <img :src="activeRoomSrc" class="portal-room-img" ref="portalRoom" />
       <button class="portal-close" @click="closePortal">✕</button>
     </div>
@@ -75,7 +64,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import Lenis from 'lenis'
 import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
@@ -84,59 +73,78 @@ gsap.registerPlugin(ScrollTrigger)
 
 // ── Card data ─────────────────────────────────────────────────────────────
 const CARDS = [
-  {
-    id: 'doctor',
-    label: 'THE DOCTOR',
-    category: 'Healthcare',
-    room: '/images/ruangan dokter.png',
-  },
-  // More cards can be added here later
+  { id: 'doctor', label: 'THE DOCTOR', category: 'Healthcare', room: '/images/ruangan dokter.png' },
+  // add more cards here later
 ]
 
-// ── Config ───────────────────────────────────────────────────────────────
-const TOTAL_FRAMES   = 196
+// ── Frame sequence config ─────────────────────────────────────────────────
+const TOTAL_FRAMES = 196
 const SCROLL_PX_PER_FRAME = 12
-const FRAME_PATH = (i: number) =>
-  `/frames/hero/frame_${String(i).padStart(4, '0')}.jpg`
+const FRAME_PATH = (i: number) => `/frames/hero/frame_${String(i).padStart(4, '0')}.jpg`
 
-// Hole position within the card PNG (measured from card dimensions)
-// Card PNG is 840x1346px (approx 5:8 ratio)
-// Hole: left=5.5%, right=94%, top=57%, bottom=90%
-// → centerX = 50%, centerY = 73.5%
-// → holeW = 88.5% of card, holeH = 33% of card
+// ── Last frame (idcard after video.png) exact pixel bounds within the PNG ─
+// PNG size: 4320 × 3072
+// Card position measured from PNG: left~36%, top~25%, width~21%, height~49%
+const LAST_FRAME_PNG = { w: 4320, h: 3072 }
+const CARD_IN_PNG = {
+  left:   0.368,   // card left edge as fraction of PNG width
+  top:    0.248,   // card top edge as fraction of PNG height
+  width:  0.215,   // card width as fraction of PNG width
+  height: 0.490,   // card height as fraction of PNG height
+}
+
+// Hole position WITHIN the card PNG (idcard polos.png)
 const HOLE = {
-  centerX: 0.500,  // 50% from left of card
-  centerY: 0.735,  // 73.5% from top of card
-  width:   0.885,  // 88.5% of card width
-  height:  0.330,  // 33% of card height
+  centerX: 0.500,
+  centerY: 0.735,
+  width:   0.885,
+  height:  0.330,
 }
 
 // ── Refs ──────────────────────────────────────────────────────────────────
 const viewRoot       = ref<HTMLElement | null>(null)
 const canvasEl       = ref<HTMLCanvasElement | null>(null)
 const scrollContainer = ref<HTMLElement | null>(null)
+const carouselScene  = ref<HTMLElement | null>(null)
 const cardsTrack     = ref<HTMLElement | null>(null)
-const cardSlots      = ref<HTMLElement[]>([])
+const cardEls        = ref<HTMLElement[]>([])
 const portalOverlay  = ref<HTMLElement | null>(null)
 const portalRoom     = ref<HTMLImageElement | null>(null)
 
 const isLoading      = ref(true)
 const loadProgress   = ref(0)
 const showCarousel   = ref(false)
-const activeCard     = ref(-1)
-const isZoomed       = ref(false)
 const activeRoomSrc  = ref('')
+const isZoomed       = ref(false)
 
-// ── Canvas state ──────────────────────────────────────────────────────────
+// ── State ─────────────────────────────────────────────────────────────────
 const images: HTMLImageElement[] = []
 let ctx: CanvasRenderingContext2D | null = null
 let currentFrame = 0
 let targetFrame  = 0
 let lenis: Lenis | null = null
 let rafId = 0
-let lenisRafId = 0
 
-// ── Draw frame ────────────────────────────────────────────────────────────
+// ── Calculate where the card appears on-screen from the canvas cover-fit ─
+function getCardScreenRect() {
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const { w: iW, h: iH } = LAST_FRAME_PNG
+  const scale = Math.max(vw / iW, vh / iH)
+  const dW = iW * scale
+  const dH = iH * scale
+  const dx = (vw - dW) / 2
+  const dy = (vh - dH) / 2
+
+  const left   = dx + CARD_IN_PNG.left  * iW * scale
+  const top    = dy + CARD_IN_PNG.top   * iH * scale
+  const width  = CARD_IN_PNG.width  * iW * scale
+  const height = CARD_IN_PNG.height * iH * scale
+
+  return { left, top, width, height }
+}
+
+// ── Draw frame to canvas ──────────────────────────────────────────────────
 function drawFrame(index: number) {
   const img = images[Math.min(index, TOTAL_FRAMES - 1)]
   if (!img || !ctx || !canvasEl.value) return
@@ -151,89 +159,147 @@ function drawFrame(index: number) {
   ctx.drawImage(img, dX, dY, dW, dH)
 }
 
-// ── Render loop ────────────────────────────────────────────────────────────
+// ── Render loop ───────────────────────────────────────────────────────────
 function tick() {
   rafId = requestAnimationFrame(tick)
   if (showCarousel.value) return
   currentFrame += (targetFrame - currentFrame) * 0.12
   drawFrame(Math.round(currentFrame))
-
-  // Trigger carousel at very end
-  if (targetFrame >= TOTAL_FRAMES - 1 && !showCarousel.value) {
+  if (targetFrame >= TOTAL_FRAMES - 1 && Math.abs(currentFrame - targetFrame) < 0.5) {
     triggerCarousel()
   }
 }
 
-// ── Carousel trigger ──────────────────────────────────────────────────────
-function triggerCarousel() {
+// ── Trigger carousel — SEAMLESS ───────────────────────────────────────────
+async function triggerCarousel() {
+  if (showCarousel.value) return
+
+  // 1. Calculate exact card rect on screen right now
+  const rect = getCardScreenRect()
+
+  // 2. Show carousel (DOM is hidden but mounted)
   showCarousel.value = true
-  // Destroy lenis and scroll events
+  await nextTick()
+
+  const track = cardsTrack.value
+  const card0 = cardEls.value[0]
+  if (!track || !card0) return
+
+  // 3. INSTANTLY position the card to match canvas — NO animation, NO transition
+  gsap.set(track, {
+    position: 'fixed',
+    left:   rect.left,
+    top:    rect.top,
+    width:  rect.width,
+    height: rect.height,
+    gap:    0,
+  })
+  gsap.set(card0, {
+    width:  rect.width,
+    height: rect.height,
+    flex:   'none',
+  })
+
+  // Also update room-layer dimensions dynamically
+  const roomLayer = card0.querySelector('.room-layer') as HTMLElement
+  if (roomLayer) {
+    const holeLeft   = rect.width * (HOLE.centerX - HOLE.width / 2)
+    const holeTop    = rect.height * (HOLE.centerY - HOLE.height / 2)
+    const holeWidth  = rect.width * HOLE.width
+    const holeHeight = rect.height * HOLE.height
+    gsap.set(roomLayer, { left: holeLeft, top: holeTop, width: holeWidth, height: holeHeight, borderRadius: 10 })
+  }
+
+  // 4. Fade canvas out — VERY fast (100ms), card is already on top
+  gsap.to(canvasEl.value, { opacity: 0, duration: 0.1 })
+
+  // 5. After canvas gone, animate card to its "resting" carousel size
+  await new Promise(r => setTimeout(r, 120))
+
+  const finalW = Math.min(300, window.innerWidth * 0.28)
+  const finalH = finalW / (rect.width / rect.height)
+  const finalLeft = (window.innerWidth - finalW) / 2
+  const finalTop  = (window.innerHeight - finalH) / 2
+
+  gsap.to(track, {
+    left:   finalLeft,
+    top:    finalTop,
+    width:  finalW,
+    height: finalH,
+    duration: 0.9,
+    ease: 'power3.inOut',
+  })
+  gsap.to(card0, {
+    width:  finalW,
+    height: finalH,
+    duration: 0.9,
+    ease: 'power3.inOut',
+    onUpdate: () => {
+      // Keep room-layer in sync during animation
+      const rl = card0.querySelector('.room-layer') as HTMLElement
+      if (!rl) return
+      const cw = parseFloat(card0.style.width || String(finalW))
+      const ch = parseFloat(card0.style.height || String(finalH))
+      Object.assign(rl.style, {
+        left:   `${cw * (HOLE.centerX - HOLE.width / 2)}px`,
+        top:    `${ch * (HOLE.centerY - HOLE.height / 2)}px`,
+        width:  `${cw * HOLE.width}px`,
+        height: `${ch * HOLE.height}px`,
+      })
+    },
+  })
+
   lenis?.destroy()
   ScrollTrigger.killAll()
 }
 
-// ── Go back to sequence ────────────────────────────────────────────────────
+// ── Go back ───────────────────────────────────────────────────────────────
 function goBack() {
   showCarousel.value = false
-  targetFrame = TOTAL_FRAMES - 2
+  gsap.set(canvasEl.value, { opacity: 1 })
+  targetFrame  = TOTAL_FRAMES - 2
   currentFrame = TOTAL_FRAMES - 2
-  // Re-init scroll
   setupScroll()
 }
 
-// ── Portal zoom ───────────────────────────────────────────────────────────
+// ── Enter portal (zoom into room) ─────────────────────────────────────────
 async function enterCard(index: number) {
   if (isZoomed.value) return
-  activeCard.value = index
   activeRoomSrc.value = CARDS[index].room
-  
+  isZoomed.value = true
   await nextTick()
 
-  const slot = cardSlots.value[index] as HTMLElement
-  if (!slot || !portalOverlay.value || !portalRoom.value) return
+  const card = cardEls.value[index]
+  if (!card || !portalOverlay.value || !portalRoom.value) return
 
-  // Get the card's current bounding rect
-  const rect = slot.getBoundingClientRect()
-  const cardW = rect.width
-  const cardH = rect.height
+  const rect = card.getBoundingClientRect()
+  const cW = rect.width, cH = rect.height
+  const holeCX = rect.left + cW * HOLE.centerX
+  const holeCY = rect.top  + cH * HOLE.centerY
+  const holeW  = cW * HOLE.width
+  const holeH  = cH * HOLE.height
 
-  // Compute hole's screen-space rect
-  const holeCX = rect.left + cardW * HOLE.centerX
-  const holeCY = rect.top  + cardH * HOLE.centerY
-  const holeW  = cardW * HOLE.width
-  const holeH  = cardH * HOLE.height
-
-  // Set the portal overlay initial position = hole rect
-  const overlay = portalOverlay.value
-  gsap.set(overlay, {
+  gsap.set(portalOverlay.value, {
+    display: 'block',
     position: 'fixed',
-    left: holeCX - holeW / 2,
-    top:  holeCY - holeH / 2,
-    width: holeW,
+    left:   holeCX - holeW / 2,
+    top:    holeCY - holeH / 2,
+    width:  holeW,
     height: holeH,
-    borderRadius: 12,
+    borderRadius: 10,
     overflow: 'hidden',
-    opacity: 1,
-    scale: 1,
     zIndex: 10000,
   })
-  gsap.set(portalRoom.value, { opacity: 1 })
-  isZoomed.value = true
 
-  // Animate: expand from hole rect to fill entire screen
-  const vw = window.innerWidth
-  const vh = window.innerHeight
+  const scaleX = window.innerWidth / holeW
+  const scaleY = window.innerHeight / holeH
+  const s = Math.max(scaleX, scaleY) * 1.05
 
-  // Calculate how much we need to scale to fill screen
-  const scaleX = vw / holeW
-  const scaleY = vh / holeH
-  const scaleTarget = Math.max(scaleX, scaleY) * 1.05
-
-  gsap.to(overlay, {
-    left:  holeCX - holeCX * scaleTarget,
-    top:   holeCY - holeCY * scaleTarget,
-    width: holeW * scaleTarget,
-    height: holeH * scaleTarget,
+  gsap.to(portalOverlay.value, {
+    left:         holeCX - holeCX * s,
+    top:          holeCY - holeCY * s,
+    width:        holeW  * s,
+    height:       holeH  * s,
     borderRadius: 0,
     duration: 1.2,
     ease: 'power3.inOut',
@@ -243,33 +309,32 @@ async function enterCard(index: number) {
 // ── Close portal ──────────────────────────────────────────────────────────
 function closePortal() {
   if (!portalOverlay.value) return
-  const slot = cardSlots.value[activeCard.value] as HTMLElement
-  if (!slot) { isZoomed.value = false; activeCard.value = -1; return }
+  const card = cardEls.value[0]
+  if (!card) { isZoomed.value = false; return }
 
-  const rect = slot.getBoundingClientRect()
-  const cardW = rect.width, cardH = rect.height
-  const holeCX = rect.left + cardW * HOLE.centerX
-  const holeCY = rect.top  + cardH * HOLE.centerY
-  const holeW  = cardW * HOLE.width
-  const holeH  = cardH * HOLE.height
+  const rect = card.getBoundingClientRect()
+  const cW = rect.width, cH = rect.height
+  const holeCX = rect.left + cW * HOLE.centerX
+  const holeCY = rect.top  + cH * HOLE.centerY
+  const holeW  = cW * HOLE.width
+  const holeH  = cH * HOLE.height
 
   gsap.to(portalOverlay.value, {
     left: holeCX - holeW / 2,
     top:  holeCY - holeH / 2,
     width: holeW,
     height: holeH,
-    borderRadius: 12,
-    duration: 0.9,
+    borderRadius: 10,
+    duration: 0.85,
     ease: 'power3.inOut',
     onComplete: () => {
+      gsap.set(portalOverlay.value!, { display: 'none' })
       isZoomed.value = false
-      activeCard.value = -1
-      gsap.set(portalOverlay.value!, { opacity: 0 })
-    }
+    },
   })
 }
 
-// ── Preload frames ────────────────────────────────────────────────────────
+// ── Preload ───────────────────────────────────────────────────────────────
 function preloadFrames(): Promise<void> {
   return new Promise(resolve => {
     let loaded = 0
@@ -286,7 +351,7 @@ function preloadFrames(): Promise<void> {
   })
 }
 
-// ── Resize canvas ─────────────────────────────────────────────────────────
+// ── Resize ────────────────────────────────────────────────────────────────
 function resizeCanvas() {
   if (!canvasEl.value) return
   canvasEl.value.width  = window.innerWidth
@@ -297,11 +362,10 @@ function resizeCanvas() {
 // ── Setup scroll ──────────────────────────────────────────────────────────
 function setupScroll() {
   if (!scrollContainer.value || !viewRoot.value) return
-  showCarousel.value = false
-
   const totalHeight = window.innerHeight + TOTAL_FRAMES * SCROLL_PX_PER_FRAME
   scrollContainer.value.style.height = `${totalHeight}px`
 
+  lenis?.destroy()
   lenis = new Lenis({
     wrapper: viewRoot.value,
     content: scrollContainer.value,
@@ -309,18 +373,13 @@ function setupScroll() {
     easing: (t: number) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
     smoothWheel: true,
   })
-
   lenis.on('scroll', ({ scroll }: { scroll: number }) => {
     const progress = Math.max(0, Math.min(1, scroll / (TOTAL_FRAMES * SCROLL_PX_PER_FRAME)))
     targetFrame = Math.floor(progress * (TOTAL_FRAMES - 1))
   })
 
-  requestAnimationFrame(lenisLoop)
-}
-
-function lenisLoop(time: number) {
-  lenis?.raf(time)
-  lenisRafId = requestAnimationFrame(lenisLoop)
+  const run = (t: number) => { lenis?.raf(t); requestAnimationFrame(run) }
+  requestAnimationFrame(run)
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -332,14 +391,12 @@ onMounted(async () => {
   await preloadFrames()
   isLoading.value = false
   drawFrame(0)
-
   setupScroll()
   tick()
 })
 
 onUnmounted(() => {
   cancelAnimationFrame(rafId)
-  cancelAnimationFrame(lenisRafId)
   lenis?.destroy()
   ScrollTrigger.killAll()
   window.removeEventListener('resize', resizeCanvas)
@@ -362,9 +419,7 @@ onUnmounted(() => {
   height: 100%;
   display: block;
   z-index: 1;
-  transition: opacity 0.6s ease;
 }
-.hero-canvas.hidden { opacity: 0; pointer-events: none; }
 
 /* ── Scroll container ─────────────────────────── */
 .scroll-container {
@@ -372,9 +427,8 @@ onUnmounted(() => {
   z-index: 2;
   width: 100%;
 }
-.scroll-container.hidden { display: none; }
 
-/* ── Loading overlay ──────────────────────────── */
+/* ── Loading ──────────────────────────────────── */
 .loading-overlay {
   position: fixed;
   inset: 0;
@@ -408,11 +462,8 @@ onUnmounted(() => {
 .carousel-scene {
   position: fixed;
   inset: 0;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #111;
+  z-index: 5;
+  pointer-events: none;
 }
 
 .back-btn {
@@ -420,6 +471,7 @@ onUnmounted(() => {
   top: 28px;
   left: 28px;
   z-index: 60;
+  pointer-events: all;
   width: 42px; height: 42px;
   border-radius: 50%;
   background: rgba(255,255,255,0.07);
@@ -444,61 +496,40 @@ onUnmounted(() => {
   pointer-events: none;
   transition: opacity 0.4s;
 }
-.hint-text.hidden { opacity: 0; }
 
-/* ── Cards track ──────────────────────────────── */
+/* ── Cards track — position set dynamically by JS ─*/
 .cards-track {
+  position: fixed;
   display: flex;
-  gap: 40px;
-  align-items: center;
-  padding: 60px;
-  overflow-x: auto;
-  scrollbar-width: none;
+  gap: 0;
+  pointer-events: all;
 }
-.cards-track::-webkit-scrollbar { display: none; }
 
 /* ── Card slot ────────────────────────────────── */
 .card-slot {
   position: relative;
   flex-shrink: 0;
   cursor: pointer;
-  /* Card displayed at 300px wide, aspect ratio of card PNG ~0.62 */
-  width: 280px;
-  height: 450px;
-  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-  user-select: none;
+  /* size & position set dynamically */
 }
-.card-slot:hover { transform: scale(1.04) translateY(-6px); }
-.card-slot.active { z-index: 10; }
+.card-slot:hover .card-frame { filter: brightness(1.08); }
 
-/* ── Room image layer (sits in the hole) ──────── */
+/* ── Room image layer ─────────────────────────── */
 .room-layer {
   position: absolute;
   z-index: 1;
-  /* Hole position: centerX=50%, centerY=73.5%, w=88.5%, h=33% of card */
-  /* Convert to absolute px for 280x450 card:
-     holeW  = 280 * 0.885 = 247.8px
-     holeH  = 450 * 0.330 = 148.5px
-     holeLeft = 280 * (0.500 - 0.885/2) = 280 * 0.0575 = 16.1px
-     holeTop  = 450 * (0.735 - 0.330/2) = 450 * 0.570 = 256.5px
-  */
-  left:   16px;
-  top:    257px;
-  width:  248px;
-  height: 149px;
-  border-radius: 12px;
   overflow: hidden;
-  pointer-events: none;
+  /* position set dynamically */
 }
-
 .room-img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+  pointer-events: none;
 }
 
-/* ── Card frame (transparent hole PNG on top) ── */
+/* ── Card frame ───────────────────────────────── */
 .card-frame {
   position: absolute;
   inset: 0;
@@ -508,49 +539,16 @@ onUnmounted(() => {
   object-fit: fill;
   pointer-events: none;
   display: block;
-}
-
-/* ── Card label ───────────────────────────────── */
-.card-label {
-  position: absolute;
-  bottom: -48px;
-  left: 0;
-  right: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  pointer-events: none;
-}
-.card-role {
-  font-family: 'Inter', sans-serif;
-  font-size: 0.78rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  color: rgba(255,255,255,0.85);
-  text-transform: uppercase;
-}
-.card-cat {
-  font-family: 'Inter', sans-serif;
-  font-size: 0.65rem;
-  letter-spacing: 0.12em;
-  color: rgba(255,255,255,0.35);
-  text-transform: uppercase;
+  transition: filter 0.2s;
 }
 
 /* ── Portal overlay ───────────────────────────── */
 .portal-overlay {
+  display: none;
   position: fixed;
   overflow: hidden;
   z-index: 10000;
-  cursor: default;
-  display: none;
 }
-.portal-overlay[style*="display: block"],
-.portal-overlay:not([style*="display: none"]) {
-  display: block;
-}
-
 .portal-room-img {
   width: 100%;
   height: 100%;
@@ -558,11 +556,9 @@ onUnmounted(() => {
   display: block;
   pointer-events: none;
 }
-
 .portal-close {
   position: fixed;
-  top: 28px;
-  right: 28px;
+  top: 28px; right: 28px;
   z-index: 10001;
   width: 42px; height: 42px;
   border-radius: 50%;
@@ -577,11 +573,6 @@ onUnmounted(() => {
 .portal-close:hover { background: rgba(255,255,255,0.15); }
 
 /* ── Transitions ──────────────────────────────── */
-.carousel-appear-enter-active { transition: opacity 0.8s ease 0.2s, transform 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.2s; }
-.carousel-appear-leave-active { transition: opacity 0.4s ease; }
-.carousel-appear-enter-from { opacity: 0; transform: scale(0.96); }
-.carousel-appear-leave-to  { opacity: 0; }
-
 .fade-enter-active, .fade-leave-active { transition: opacity 0.8s ease; }
 .fade-enter-from,  .fade-leave-to      { opacity: 0; }
 </style>
