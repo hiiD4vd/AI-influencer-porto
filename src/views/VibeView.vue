@@ -25,6 +25,27 @@
 
     <!-- Carousel scene — mounts on top of canvas, card starts at EXACT canvas position -->
     <div class="carousel-scene" v-show="showCarousel" ref="carouselScene">
+      
+      <!-- Independent room layer that can scale beautifully without being constrained by the grey card -->
+      <div class="room-layer" :class="{ 'is-zoomed': isZoomed }">
+        <div class="parallax-container" ref="parallaxContainer">
+          <img :src="CARDS[0].room" class="room-img" draggable="false" />
+          
+          <!-- Hotspots -->
+          <div 
+            v-for="spot in HOTSPOTS" 
+            :key="spot.id"
+            class="hotspot"
+            :style="{ left: spot.left, top: spot.top }"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="16"></line>
+              <line x1="8" y1="12" x2="16" y2="12"></line>
+            </svg>
+          </div>
+        </div>
+      </div>
 
       <!-- Cards track — uses CSS transform to slide siblings in -->
       <div class="cards-track" ref="cardsTrack">
@@ -34,10 +55,6 @@
           class="card-slot"
           :ref="el => { if (el) cardEls[i] = el as HTMLElement }"
         >
-          <!-- Room behind the hole -->
-          <div class="room-layer">
-            <img :src="card.room" class="room-img" draggable="false" />
-          </div>
           <!-- Card frame with transparent hole on top -->
           <img src="/images/idcard polos.png" class="card-frame" draggable="false" />
           
@@ -71,7 +88,13 @@ gsap.registerPlugin(ScrollTrigger)
 // ── Card data ─────────────────────────────────────────────────────────────
 const CARDS = [
   { id: 'doctor', label: 'THE DOCTOR', category: 'Healthcare', room: '/images/ruangan dokter.png' },
-  // add more cards here later
+]
+
+const HOTSPOTS = [
+  { id: 'mri', left: '72%', top: '55%' },
+  { id: 'brain', left: '16%', top: '33%' },
+  { id: 'tablet', left: '54%', top: '48%' },
+  { id: 'machine', left: '8%', top: '65%' }
 ]
 
 // ── Frame sequence config ─────────────────────────────────────────────────
@@ -79,9 +102,6 @@ const TOTAL_FRAMES = 196
 const SCROLL_PX_PER_FRAME = 12
 const FRAME_PATH = (i: number) => `/frames/hero/frame_${String(i).padStart(4, '0')}.jpg`
 
-// ── Last frame (idcard after video.png) exact pixel bounds within the PNG ─
-// PNG size: 4320 × 3072
-// Card position accurately measured from pixels
 const LAST_FRAME_PNG = { w: 4320, h: 3072 }
 const CARD_IN_PNG = {
   left:   0.4111,
@@ -90,8 +110,6 @@ const CARD_IN_PNG = {
   height: 0.4193,
 }
 
-// Hole position WITHIN the card PNG (idcard polos.png)
-// Accurate measurement from alpha channel
 const HOLE = {
   centerX: 0.5078,
   centerY: 0.6750,
@@ -103,8 +121,8 @@ const HOLE = {
 const viewRoot       = ref<HTMLElement | null>(null)
 const canvasEl       = ref<HTMLCanvasElement | null>(null)
 const scrollContainer = ref<HTMLElement | null>(null)
-const carouselScene  = ref<HTMLElement | null>(null)
 const cardsTrack     = ref<HTMLElement | null>(null)
+const parallaxContainer = ref<HTMLElement | null>(null)
 const cardEls        = ref<HTMLElement[]>([])
 const isLoading      = ref(true)
 const loadProgress   = ref(0)
@@ -157,7 +175,6 @@ function drawFrame(index: number) {
 // ── Render loop ───────────────────────────────────────────────────────────
 function tick() {
   rafId = requestAnimationFrame(tick)
-  // Don't render frames if we are fully zoomed in, but keep updating if we are transitioning
   if (targetFrame < TOTAL_FRAMES - 1) {
     currentFrame += (targetFrame - currentFrame) * 0.12
     drawFrame(Math.round(currentFrame))
@@ -174,17 +191,11 @@ function renderCardZoom(progress: number) {
   const card0 = cardEls.value[0]
   const track = cardsTrack.value
 
-  // Base rect matching canvas EXACTLY
   const rect = getCardScreenRect()
-
-  // Final rect where hole is centered and fills screen
   const holeW = rect.width * HOLE.width
   const holeH = rect.height * HOLE.height
 
-  // 1. GREY CARD (CARDS TRACK) ANIMATION
-  // Scale multiplied by 1.15 to ensure the grey card borders completely disappear
   const maxScale = Math.max(window.innerWidth / holeW, window.innerHeight / holeH) * 1.15
-
   const finalW = rect.width * maxScale
   const finalH = rect.height * maxScale
   const finalLeft = window.innerWidth / 2 - finalW * HOLE.centerX
@@ -204,7 +215,7 @@ function renderCardZoom(progress: number) {
     width: currW,
     height: currH,
     gap: 0,
-    zIndex: 2 // Keep above room layer
+    zIndex: 2
   })
   gsap.set(card0, {
     width: currW,
@@ -212,14 +223,11 @@ function renderCardZoom(progress: number) {
     flex: 'none'
   })
 
-  // 2. ROOM LAYER ANIMATION (INDEPENDENT)
-  // Start coords exactly matching the hole
   const startRoomLeft = rect.left + rect.width * (HOLE.centerX - HOLE.width / 2)
   const startRoomTop = rect.top + rect.height * (HOLE.centerY - HOLE.height / 2)
   const startRoomW = rect.width * HOLE.width
   const startRoomH = rect.height * HOLE.height
 
-  // Final coords covering the screen with 10% overflow for mouse panning
   const overScale = 1.10
   const endRoomW = window.innerWidth * overScale
   const endRoomH = window.innerHeight * overScale
@@ -231,8 +239,7 @@ function renderCardZoom(progress: number) {
   const currRoomW = startRoomW + (endRoomW - startRoomW) * easeP
   const currRoomH = startRoomH + (endRoomH - startRoomH) * easeP
 
-  const roomLayer = card0.querySelector('.room-layer') as HTMLElement
-  const roomImg = card0.querySelector('.room-img') as HTMLElement
+  const roomLayer = document.querySelector('.room-layer') as HTMLElement
   
   if (roomLayer) {
     gsap.set(roomLayer, {
@@ -242,17 +249,15 @@ function renderCardZoom(progress: number) {
       width: currRoomW,
       height: currRoomH,
       borderRadius: 10 - (10 * easeP),
-      zIndex: 1 // Keep behind card frame
+      zIndex: 1
     })
   }
   
-  if (roomImg) {
-    // Parallax effect: image scales down slightly to 1.0 as we zoom in
+  if (parallaxContainer.value) {
     const imgScale = 1.05 + (0.15 * (1 - easeP))
-    gsap.set(roomImg, { scale: imgScale, transformOrigin: 'center center' })
+    gsap.set(parallaxContainer.value, { scale: imgScale, transformOrigin: 'center center' })
   }
 
-  // Fade canvas to hide the background as we zoom in
   const canvasOpacity = 1 - Math.min(1, Math.max(0, (easeP - 0.1) / 0.5))
   if (canvasEl.value) canvasEl.value.style.opacity = canvasOpacity.toString()
 }
@@ -261,8 +266,6 @@ function renderCardZoom(progress: number) {
 function enterCard() {
   if (isZoomed.value) return
   isZoomed.value = true
-  
-  // Stop scrolling
   lenis?.stop()
   
   const dummy = { p: 0 }
@@ -278,42 +281,17 @@ function enterCard() {
       window.addEventListener('mousemove', handleMouseMove)
     }
   })
-  
-  // Motion blur effect
-  if (cardEls.value[0]) {
-    const roomLayer = cardEls.value[0].querySelector('.room-layer') as HTMLElement
-    if (roomLayer) {
-      gsap.fromTo(roomLayer, 
-        { filter: 'blur(0px)' }, 
-        { filter: 'blur(8px)', duration: 0.9, yoyo: true, repeat: 1, ease: 'power2.in' }
-      )
-    }
-  }
 }
 
 // ── Exit animation ────────────────────────────────────────────────────────
 function exitCard() {
   if (!isZoomed.value) return
   isZoomed.value = false
-  
   window.removeEventListener('mousemove', handleMouseMove)
   
-  // Reset panning smoothly
-  if (cardEls.value[0]) {
-    const roomLayer = cardEls.value[0].querySelector('.room-layer') as HTMLElement
-    if (roomLayer) {
-      gsap.to(roomLayer, {
-        x: 0, y: 0,
-        duration: 0.8,
-        ease: "power3.out"
-      })
-      
-      // Motion blur effect for exiting
-      gsap.fromTo(roomLayer, 
-        { filter: 'blur(0px)' }, 
-        { filter: 'blur(8px)', duration: 0.8, yoyo: true, repeat: 1, ease: 'power2.in' }
-      )
-    }
+  const roomLayer = document.querySelector('.room-layer') as HTMLElement
+  if (roomLayer) {
+    gsap.to(roomLayer, { x: 0, y: 0, duration: 0.8, ease: "power3.out" })
   }
 
   const dummy = { p: currentZoomP }
@@ -326,40 +304,28 @@ function exitCard() {
       renderCardZoom(currentZoomP)
     },
     onComplete: () => {
-      lenis?.start() // Resume scrolling
+      lenis?.start()
     }
   })
 }
 
 // ── Parallax POV (Camera Pan) ─────────────────────────────────────────────
 function handleMouseMove(e: MouseEvent) {
-  if (!isZoomed.value || !cardEls.value[0]) return
+  if (!isZoomed.value || !parallaxContainer.value) return
   
-  const roomLayer = cardEls.value[0].querySelector('.room-layer') as HTMLElement
-  if (!roomLayer) return
-
   const nx = (e.clientX / window.innerWidth) - 0.5
   const ny = (e.clientY / window.innerHeight) - 0.5
   
-  // Since roomLayer is exactly 1.10x the screen size at full zoom,
-  // we have exactly 10% overflow. (5% on each side)
-  // Window innerWidth * 0.05 is the max we can pan.
   const maxMoveX = window.innerWidth * 0.05
   const maxMoveY = window.innerHeight * 0.05
 
-  // nx goes from -0.5 to 0.5
-  const moveX = nx * -(maxMoveX * 2)
-  const moveY = ny * -(maxMoveY * 2)
-
-  gsap.to(roomLayer, {
-    x: moveX,
-    y: moveY,
+  gsap.to(parallaxContainer.value, {
+    x: nx * -(maxMoveX * 2),
+    y: ny * -(maxMoveY * 2),
     duration: 1.2,
     ease: "power2.out"
   })
 }
-
-
 
 // ── Preload ───────────────────────────────────────────────────────────────
 function preloadFrames(): Promise<void> {
@@ -389,7 +355,6 @@ function resizeCanvas() {
 // ── Setup scroll ──────────────────────────────────────────────────────────
 function setupScroll() {
   if (!scrollContainer.value || !viewRoot.value) return
-  
   const videoScrollHeight = TOTAL_FRAMES * SCROLL_PX_PER_FRAME
   const totalHeight = window.innerHeight + videoScrollHeight
   scrollContainer.value.style.height = `${totalHeight}px`
@@ -404,9 +369,7 @@ function setupScroll() {
   })
   
   lenis.on('scroll', ({ scroll }: { scroll: number }) => {
-    if (isZoomed.value) return // Disable video scrub once zoomed
-    
-    // Phase 1: Video scrubbing (0 to videoScrollHeight)
+    if (isZoomed.value) return
     let videoProgress = Math.max(0, Math.min(1, scroll / videoScrollHeight))
     targetFrame = Math.floor(videoProgress * (TOTAL_FRAMES - 1))
     
@@ -432,7 +395,6 @@ onMounted(async () => {
   resizeCanvas()
   ctx = canvasEl.value!.getContext('2d')
   window.addEventListener('resize', resizeCanvas)
-
   await preloadFrames()
   isLoading.value = false
   drawFrame(0)
@@ -443,7 +405,6 @@ onMounted(async () => {
 onUnmounted(() => {
   cancelAnimationFrame(rafId)
   lenis?.destroy()
-  ScrollTrigger.killAll()
   window.removeEventListener('resize', resizeCanvas)
 })
 </script>
@@ -456,7 +417,6 @@ onUnmounted(() => {
   background: #000;
 }
 
-/* ── Canvas ───────────────────────────────────── */
 .hero-canvas {
   position: fixed;
   inset: 0;
@@ -466,14 +426,12 @@ onUnmounted(() => {
   z-index: 1;
 }
 
-/* ── Scroll container ─────────────────────────── */
 .scroll-container {
   position: relative;
   z-index: 2;
   width: 100%;
 }
 
-/* ── Loading ──────────────────────────────────── */
 .loading-overlay {
   position: fixed;
   inset: 0;
@@ -503,7 +461,6 @@ onUnmounted(() => {
   color: rgba(255,255,255,0.4);
 }
 
-/* ── Carousel scene ───────────────────────────── */
 .carousel-scene {
   position: fixed;
   inset: 0;
@@ -511,7 +468,6 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
-/* ── Cards track — position set dynamically by JS ─*/
 .cards-track {
   position: fixed;
   display: flex;
@@ -519,20 +475,23 @@ onUnmounted(() => {
   pointer-events: all;
 }
 
-/* ── Card slot ────────────────────────────────── */
 .card-slot {
   position: relative;
   flex-shrink: 0;
-  /* size & position set dynamically */
 }
 
-/* ── Room image layer ─────────────────────────── */
 .room-layer {
   position: absolute;
   z-index: 1;
   overflow: hidden;
-  /* position set dynamically */
 }
+
+.parallax-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
 .room-img {
   width: 100%;
   height: 100%;
@@ -541,7 +500,62 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
-/* ── Card frame ───────────────────────────────── */
+.hotspot {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  background: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  z-index: 10;
+  color: #111;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.6s ease, transform 0.2s ease;
+}
+
+.hotspot svg {
+  width: 20px;
+  height: 20px;
+}
+
+.hotspot:hover {
+  transform: translate(-50%, -50%) scale(1.1);
+}
+
+.room-layer.is-zoomed .hotspot {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.hotspot::before, .hotspot::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  animation: radar 2s infinite linear;
+  pointer-events: none;
+}
+
+.hotspot::after {
+  animation-delay: 1s;
+}
+
+@keyframes radar {
+  0% { width: 100%; height: 100%; opacity: 1; }
+  100% { width: 250%; height: 250%; opacity: 0; }
+}
+
 .card-frame {
   position: absolute;
   inset: 0;
