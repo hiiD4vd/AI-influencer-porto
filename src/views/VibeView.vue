@@ -26,27 +26,6 @@
     <!-- Carousel scene — mounts on top of canvas, card starts at EXACT canvas position -->
     <div class="carousel-scene" v-show="showCarousel" ref="carouselScene">
       
-      <!-- Independent room layer that can scale beautifully without being constrained by the grey card -->
-      <div class="room-layer" :class="{ 'is-zoomed': isZoomed }">
-        <div class="parallax-container" ref="parallaxContainer">
-          <img :src="CARDS[activeCardIndex].room" class="room-img" draggable="false" />
-          
-          <!-- Hotspots -->
-          <div 
-            v-for="spot in HOTSPOTS" 
-            :key="spot.id"
-            class="hotspot"
-            :style="{ left: spot.left, top: spot.top }"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="12" y1="8" x2="12" y2="16"></line>
-              <line x1="8" y1="12" x2="16" y2="12"></line>
-            </svg>
-          </div>
-        </div>
-      </div>
-
       <!-- Navigation Arrows -->
       <button class="nav-arrow prev" v-show="!isZoomed && activeCardIndex > 0" @click.stop="prevCard">
         <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
@@ -63,6 +42,27 @@
           class="card-slot"
           :ref="el => { if (el) cardEls[i] = el as HTMLElement }"
         >
+          <!-- Room behind the hole -->
+          <div class="room-layer" :class="{ 'is-zoomed': isZoomed && activeCardIndex === i }">
+            <div class="parallax-container" :ref="el => { if (el) parallaxContainers[i] = el as HTMLElement }">
+              <img :src="card.room" class="room-img" draggable="false" />
+              
+              <!-- Hotspots -->
+              <div 
+                v-for="spot in HOTSPOTS" 
+                :key="spot.id"
+                class="hotspot"
+                :style="{ left: spot.left, top: spot.top }"
+              >
+                <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="12" y1="8" x2="12" y2="16"></line>
+                  <line x1="8" y1="12" x2="16" y2="12"></line>
+                </svg>
+              </div>
+            </div>
+          </div>
+
           <!-- Card frame with transparent hole on top -->
           <img src="/images/idcard polos.png" class="card-frame" draggable="false" />
           
@@ -86,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import Lenis from 'lenis'
 import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
@@ -132,7 +132,7 @@ const viewRoot       = ref<HTMLElement | null>(null)
 const canvasEl       = ref<HTMLCanvasElement | null>(null)
 const scrollContainer = ref<HTMLElement | null>(null)
 const cardsTrack     = ref<HTMLElement | null>(null)
-const parallaxContainer = ref<HTMLElement | null>(null)
+const parallaxContainers = ref<HTMLElement[]>([])
 const cardEls        = ref<HTMLElement[]>([])
 const isLoading      = ref(true)
 const loadProgress   = ref(0)
@@ -142,12 +142,13 @@ let idleTimeout: any = null
 let idleTween: gsap.core.Tween | null = null
 
 function startIdleAnimation() {
-  if (!isZoomed.value || !parallaxContainer.value) return
+  const activeParallax = parallaxContainers.value[activeCardIndex.value]
+  if (!isZoomed.value || !activeParallax) return
   
   const maxMoveX = window.innerWidth * 0.05
   const maxMoveY = window.innerHeight * 0.05
 
-  idleTween = gsap.to(parallaxContainer.value, {
+  idleTween = gsap.to(activeParallax, {
     x: `random(-${maxMoveX}, ${maxMoveX})`,
     y: `random(-${maxMoveY}, ${maxMoveY})`,
     duration: 8,
@@ -245,9 +246,7 @@ function renderCardZoom(progress: number) {
   currentZoomP = progress
   if (!cardsTrack.value || !cardEls.value[0]) return
 
-  const card0 = cardEls.value[0]
   const track = cardsTrack.value
-
   const rect = getCardScreenRect()
   const holeW = rect.width * HOLE.width
   const holeH = rect.height * HOLE.height
@@ -265,7 +264,6 @@ function renderCardZoom(progress: number) {
   const currLeft = rect.left + (finalLeft - rect.left) * easeP
   const currTop = rect.top + (finalTop - rect.top) * easeP
 
-  // The gap between cards is exactly enough to make one card per screen
   const baseGap = window.innerWidth - rect.width
   const trackX = -sliderProxy.index * (currW + baseGap)
 
@@ -290,39 +288,47 @@ function renderCardZoom(progress: number) {
     }
   })
 
-  const startRoomLeft = rect.left + rect.width * (HOLE.centerX - HOLE.width / 2)
-  const startRoomTop = rect.top + rect.height * (HOLE.centerY - HOLE.height / 2)
-  const startRoomW = rect.width * HOLE.width
-  const startRoomH = rect.height * HOLE.height
+  const activeRoomLayer = cardEls.value[activeCardIndex.value]?.querySelector('.room-layer') as HTMLElement
+  const activeParallax = parallaxContainers.value[activeCardIndex.value]
 
-  const overScale = 1.10
-  const endRoomW = window.innerWidth * overScale
-  const endRoomH = window.innerHeight * overScale
-  const endRoomLeft = (window.innerWidth - endRoomW) / 2
-  const endRoomTop = (window.innerHeight - endRoomH) / 2
+  if (easeP > 0) {
+    const startRoomLeft = rect.left + rect.width * (HOLE.centerX - HOLE.width / 2)
+    const startRoomTop = rect.top + rect.height * (HOLE.centerY - HOLE.height / 2)
+    const startRoomW = rect.width * HOLE.width
+    const startRoomH = rect.height * HOLE.height
 
-  const currRoomLeft = startRoomLeft + (endRoomLeft - startRoomLeft) * easeP
-  const currRoomTop = startRoomTop + (endRoomTop - startRoomTop) * easeP
-  const currRoomW = startRoomW + (endRoomW - startRoomW) * easeP
-  const currRoomH = startRoomH + (endRoomH - startRoomH) * easeP
+    const overScale = 1.10
+    const endRoomW = window.innerWidth * overScale
+    const endRoomH = window.innerHeight * overScale
+    const endRoomLeft = (window.innerWidth - endRoomW) / 2
+    const endRoomTop = (window.innerHeight - endRoomH) / 2
 
-  const roomLayer = document.querySelector('.room-layer') as HTMLElement
-  
-  if (roomLayer) {
-    gsap.set(roomLayer, {
-      position: 'fixed',
-      left: currRoomLeft,
-      top: currRoomTop,
-      width: currRoomW,
-      height: currRoomH,
-      borderRadius: 10 - (10 * easeP),
-      zIndex: 1
+    const currRoomLeft = startRoomLeft + (endRoomLeft - startRoomLeft) * easeP
+    const currRoomTop = startRoomTop + (endRoomTop - startRoomTop) * easeP
+    const currRoomW = startRoomW + (endRoomW - startRoomW) * easeP
+    const currRoomH = startRoomH + (endRoomH - startRoomH) * easeP
+    
+    if (activeRoomLayer) {
+      gsap.set(activeRoomLayer, {
+        position: 'fixed',
+        left: currRoomLeft,
+        top: currRoomTop,
+        width: currRoomW,
+        height: currRoomH,
+        borderRadius: 10 - (10 * easeP),
+        zIndex: 1
+      })
+    }
+  } else {
+    cardEls.value.forEach(card => {
+      const rl = card?.querySelector('.room-layer')
+      if (rl) gsap.set(rl, { clearProps: 'all' })
     })
   }
   
-  if (parallaxContainer.value) {
+  if (activeParallax) {
     const imgScale = 1.05 + (0.15 * (1 - easeP))
-    gsap.set(parallaxContainer.value, { scale: imgScale, transformOrigin: 'center center' })
+    gsap.set(activeParallax, { scale: imgScale, transformOrigin: 'center center' })
   }
 
   const canvasOpacity = 1 - Math.min(1, Math.max(0, (easeP - 0.1) / 0.5))
@@ -348,7 +354,6 @@ function enterCard() {
       lenis?.start()
       window.addEventListener('mousemove', handleMouseMove)
       
-      // Start idle timeout if user doesn't move mouse
       if (idleTimeout) clearTimeout(idleTimeout)
       idleTimeout = setTimeout(startIdleAnimation, 2000)
     }
@@ -364,8 +369,9 @@ function exitCard() {
   if (idleTimeout) clearTimeout(idleTimeout)
   if (idleTween) idleTween.kill()
   
-  if (parallaxContainer.value) {
-    gsap.to(parallaxContainer.value, { x: 0, y: 0, duration: 0.8, ease: "power3.out" })
+  const activeParallax = parallaxContainers.value[activeCardIndex.value]
+  if (activeParallax) {
+    gsap.to(activeParallax, { x: 0, y: 0, duration: 0.8, ease: "power3.out" })
   }
 
   const dummy = { p: currentZoomP }
@@ -385,7 +391,8 @@ function exitCard() {
 
 // ── Parallax POV (Camera Pan) ─────────────────────────────────────────────
 function handleMouseMove(e: MouseEvent) {
-  if (!isZoomed.value || !parallaxContainer.value) return
+  const activeParallax = parallaxContainers.value[activeCardIndex.value]
+  if (!isZoomed.value || !activeParallax) return
   
   if (idleTimeout) clearTimeout(idleTimeout)
   if (idleTween) {
@@ -399,14 +406,13 @@ function handleMouseMove(e: MouseEvent) {
   const maxMoveX = window.innerWidth * 0.05
   const maxMoveY = window.innerHeight * 0.05
 
-  gsap.to(parallaxContainer.value, {
+  gsap.to(activeParallax, {
     x: nx * -(maxMoveX * 2),
     y: ny * -(maxMoveY * 2),
     duration: 1.2,
     ease: "power2.out"
   })
 
-  // Restart idle animation if mouse stays still
   idleTimeout = setTimeout(startIdleAnimation, 3000)
 }
 
@@ -562,7 +568,7 @@ onUnmounted(() => {
 }
 
 .cards-track.is-zoomed {
-  pointer-events: none; /* Let clicks pass through to the room layer */
+  pointer-events: none;
 }
 
 .card-slot {
@@ -570,10 +576,16 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+/* ── Room image layer ─────────────────────────── */
 .room-layer {
   position: absolute;
+  left: 5.45%;
+  top: 46.535%;
+  width: 90.66%;
+  height: 41.93%;
   z-index: 1;
   overflow: hidden;
+  border-radius: 10px;
 }
 
 .parallax-container {
