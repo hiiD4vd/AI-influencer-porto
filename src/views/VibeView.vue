@@ -174,10 +174,10 @@ function tick() {
 async function triggerCarousel() {
   if (showCarousel.value) return
 
-  // 1. Calculate exact card rect on screen right now
+  // 1. Calculate exact card rect matching the last frame's canvas rendering
   const rect = getCardScreenRect()
 
-  // 2. Show carousel (DOM is hidden but mounted)
+  // 2. Show carousel DOM (still invisible until positioned)
   showCarousel.value = true
   await nextTick()
 
@@ -185,7 +185,8 @@ async function triggerCarousel() {
   const card0 = cardEls.value[0]
   if (!track || !card0) return
 
-  // 3. INSTANTLY position the card to match canvas — NO animation, NO transition
+  // 3. INSTANTLY position HTML card at EXACT same position as the canvas card
+  //    NO animation, NO transition — user sees zero difference
   gsap.set(track, {
     position: 'fixed',
     left:   rect.left,
@@ -200,55 +201,18 @@ async function triggerCarousel() {
     flex:   'none',
   })
 
-  // Also update room-layer dimensions dynamically
+  // Sync room-layer to match hole in card
   const roomLayer = card0.querySelector('.room-layer') as HTMLElement
   if (roomLayer) {
-    const holeLeft   = rect.width * (HOLE.centerX - HOLE.width / 2)
+    const holeLeft   = rect.width  * (HOLE.centerX - HOLE.width  / 2)
     const holeTop    = rect.height * (HOLE.centerY - HOLE.height / 2)
-    const holeWidth  = rect.width * HOLE.width
-    const holeHeight = rect.height * HOLE.height
-    gsap.set(roomLayer, { left: holeLeft, top: holeTop, width: holeWidth, height: holeHeight, borderRadius: 10 })
+    const holeW      = rect.width  * HOLE.width
+    const holeH      = rect.height * HOLE.height
+    gsap.set(roomLayer, { left: holeLeft, top: holeTop, width: holeW, height: holeH, borderRadius: 10 })
   }
 
-  // 4. Fade canvas out — VERY fast (100ms), card is already on top
-  gsap.to(canvasEl.value, { opacity: 0, duration: 0.1 })
-
-  // 5. After canvas gone, animate card to its "resting" carousel size
-  await new Promise(r => setTimeout(r, 120))
-
-  const finalW = Math.min(300, window.innerWidth * 0.28)
-  const finalH = finalW / (rect.width / rect.height)
-  const finalLeft = (window.innerWidth - finalW) / 2
-  const finalTop  = (window.innerHeight - finalH) / 2
-
-  gsap.to(track, {
-    left:   finalLeft,
-    top:    finalTop,
-    width:  finalW,
-    height: finalH,
-    duration: 0.9,
-    ease: 'power3.inOut',
-  })
-  gsap.to(card0, {
-    width:  finalW,
-    height: finalH,
-    duration: 0.9,
-    ease: 'power3.inOut',
-    onUpdate: () => {
-      // Keep room-layer in sync during animation
-      const rl = card0.querySelector('.room-layer') as HTMLElement
-      if (!rl) return
-      const cw = parseFloat(card0.style.width || String(finalW))
-      const ch = parseFloat(card0.style.height || String(finalH))
-      Object.assign(rl.style, {
-        left:   `${cw * (HOLE.centerX - HOLE.width / 2)}px`,
-        top:    `${ch * (HOLE.centerY - HOLE.height / 2)}px`,
-        width:  `${cw * HOLE.width}px`,
-        height: `${ch * HOLE.height}px`,
-      })
-    },
-  })
-
+  // 4. Canvas stays visible underneath — background stays matching.
+  //    No fade, no hide, nothing jarring. Just stop the render loop.
   lenis?.destroy()
   ScrollTrigger.killAll()
 }
