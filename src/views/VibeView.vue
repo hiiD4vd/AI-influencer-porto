@@ -158,7 +158,30 @@ function drawFrame(index: number) {
 function tick() {
   rafId = requestAnimationFrame(tick)
   // Don't render frames if we are fully zoomed in, but keep updating if we are transitioning
-  i  // 1. GREY CARD (CARDS TRACK) ANIMATION
+  if (targetFrame < TOTAL_FRAMES - 1) {
+    currentFrame += (targetFrame - currentFrame) * 0.12
+    drawFrame(Math.round(currentFrame))
+  } else if (currentFrame < TOTAL_FRAMES - 1) {
+    currentFrame += (targetFrame - currentFrame) * 0.12
+    drawFrame(Math.round(currentFrame))
+  }
+}
+
+// ── Zoom logic based on progress ──────────────────────────────────────────
+function renderCardZoom(progress: number) {
+  if (!cardsTrack.value || !cardEls.value[0]) return
+
+  const card0 = cardEls.value[0]
+  const track = cardsTrack.value
+
+  // Base rect matching canvas EXACTLY
+  const rect = getCardScreenRect()
+
+  // Final rect where hole is centered and fills screen
+  const holeW = rect.width * HOLE.width
+  const holeH = rect.height * HOLE.height
+
+  // 1. GREY CARD (CARDS TRACK) ANIMATION
   // Scale multiplied by 1.15 to ensure the grey card borders completely disappear
   const maxScale = Math.max(window.innerWidth / holeW, window.innerHeight / holeH) * 1.15
 
