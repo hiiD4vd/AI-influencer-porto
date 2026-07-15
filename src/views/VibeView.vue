@@ -553,22 +553,32 @@ onUnmounted(() => {
   color: #111;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.3s ease, transform 0.2s ease;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+  /* Use a bouncy spring easing for the transform */
+  transition: opacity 0.3s ease, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .hotspot svg {
   width: 20px;
   height: 20px;
+  transition: transform 0.3s ease;
 }
 
 .hotspot:hover {
-  transform: translate(-50%, -50%) scale(1.1);
+  transform: translate(-50%, -50%) scale(1.25);
+  background: #111;
+  color: white;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+}
+
+.hotspot:hover svg {
+  transform: scale(1.1);
 }
 
 .room-layer.is-zoomed .hotspot {
   opacity: 1;
   pointer-events: all;
-  transition: opacity 0.8s ease, transform 0.2s ease;
+  transition: opacity 0.8s ease, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.3s ease, color 0.3s ease;
   transition-delay: 1.5s; /* Wait for zoom animation to almost finish */
 }
 
@@ -585,6 +595,11 @@ onUnmounted(() => {
   transform: translate(-50%, -50%);
   animation: radar 2s infinite linear;
   pointer-events: none;
+  transition: border-color 0.3s ease;
+}
+
+.hotspot:hover::before, .hotspot:hover::after {
+  border: 1px solid rgba(17, 17, 17, 0.5);
 }
 
 .hotspot::after {
