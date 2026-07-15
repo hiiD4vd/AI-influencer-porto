@@ -444,7 +444,7 @@ onUnmounted(() => {
 /* ── Enter button ─────────────────────────────── */
 .enter-btn {
   position: absolute;
-  bottom: 8%;
+  bottom: -60px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 10;
