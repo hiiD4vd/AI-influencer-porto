@@ -126,6 +126,25 @@ const parallaxContainer = ref<HTMLElement | null>(null)
 const cardEls        = ref<HTMLElement[]>([])
 const isLoading      = ref(true)
 const loadProgress   = ref(0)
+
+// ── Idle Animation State ──────────────────────────────────────────────────
+let idleTimeout: any = null
+let idleTween: gsap.core.Tween | null = null
+
+function startIdleAnimation() {
+  if (!isZoomed.value || !parallaxContainer.value) return
+  
+  const maxMoveX = window.innerWidth * 0.05
+  const maxMoveY = window.innerHeight * 0.05
+
+  idleTween = gsap.to(parallaxContainer.value, {
+    x: `random(-${maxMoveX}, ${maxMoveX})`,
+    y: `random(-${maxMoveY}, ${maxMoveY})`,
+    duration: 8,
+    ease: "sine.inOut",
+    onComplete: startIdleAnimation
+  })
+}
 const showCarousel   = ref(false)
 const isZoomed       = ref(false)
 let currentZoomP     = 0
@@ -278,7 +297,12 @@ function enterCard() {
       renderCardZoom(currentZoomP)
     },
     onComplete: () => {
+      lenis?.start()
       window.addEventListener('mousemove', handleMouseMove)
+      
+      // Start idle timeout if user doesn't move mouse
+      if (idleTimeout) clearTimeout(idleTimeout)
+      idleTimeout = setTimeout(startIdleAnimation, 2000)
     }
   })
 }
@@ -289,9 +313,11 @@ function exitCard() {
   isZoomed.value = false
   window.removeEventListener('mousemove', handleMouseMove)
   
-  const roomLayer = document.querySelector('.room-layer') as HTMLElement
-  if (roomLayer) {
-    gsap.to(roomLayer, { x: 0, y: 0, duration: 0.8, ease: "power3.out" })
+  if (idleTimeout) clearTimeout(idleTimeout)
+  if (idleTween) idleTween.kill()
+  
+  if (parallaxContainer.value) {
+    gsap.to(parallaxContainer.value, { x: 0, y: 0, duration: 0.8, ease: "power3.out" })
   }
 
   const dummy = { p: currentZoomP }
@@ -313,6 +339,12 @@ function exitCard() {
 function handleMouseMove(e: MouseEvent) {
   if (!isZoomed.value || !parallaxContainer.value) return
   
+  if (idleTimeout) clearTimeout(idleTimeout)
+  if (idleTween) {
+    idleTween.kill()
+    idleTween = null
+  }
+  
   const nx = (e.clientX / window.innerWidth) - 0.5
   const ny = (e.clientY / window.innerHeight) - 0.5
   
@@ -325,6 +357,9 @@ function handleMouseMove(e: MouseEvent) {
     duration: 1.2,
     ease: "power2.out"
   })
+
+  // Restart idle animation if mouse stays still
+  idleTimeout = setTimeout(startIdleAnimation, 3000)
 }
 
 // ── Preload ───────────────────────────────────────────────────────────────
@@ -405,7 +440,10 @@ onMounted(async () => {
 onUnmounted(() => {
   cancelAnimationFrame(rafId)
   lenis?.destroy()
+  if (idleTimeout) clearTimeout(idleTimeout)
+  if (idleTween) idleTween.kill()
   window.removeEventListener('resize', resizeCanvas)
+  window.removeEventListener('mousemove', handleMouseMove)
 })
 </script>
 
