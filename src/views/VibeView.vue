@@ -158,30 +158,8 @@ function drawFrame(index: number) {
 function tick() {
   rafId = requestAnimationFrame(tick)
   // Don't render frames if we are fully zoomed in, but keep updating if we are transitioning
-  if (targetFrame < TOTAL_FRAMES - 1) {
-    currentFrame += (targetFrame - currentFrame) * 0.12
-    drawFrame(Math.round(currentFrame))
-  } else if (currentFrame < TOTAL_FRAMES - 1) {
-    currentFrame += (targetFrame - currentFrame) * 0.12
-    drawFrame(Math.round(currentFrame))
-  }
-}
-
-// ── Zoom logic based on progress ──────────────────────────────────────────
-function renderCardZoom(progress: number) {
-  if (!cardsTrack.value || !cardEls.value[0]) return
-
-  const card0 = cardEls.value[0]
-  const track = cardsTrack.value
-
-  // Base rect matching canvas EXACTLY
-  const rect = getCardScreenRect()
-
-  // Final rect where hole is centered and fills screen
-  const holeW = rect.width * HOLE.width
-  const holeH = rect.height * HOLE.height
-  
-  // Scale reduced to 1.15 so it's not too zoomed, but just enough to hide grey borders
+  i  // 1. GREY CARD (CARDS TRACK) ANIMATION
+  // Scale multiplied by 1.15 to ensure the grey card borders completely disappear
   const maxScale = Math.max(window.innerWidth / holeW, window.innerHeight / holeH) * 1.15
 
   const finalW = rect.width * maxScale
@@ -189,7 +167,7 @@ function renderCardZoom(progress: number) {
   const finalLeft = window.innerWidth / 2 - finalW * HOLE.centerX
   const finalTop  = window.innerHeight / 2 - finalH * HOLE.centerY
 
-  const easeP = gsap.parseEase("power3.inOut")(progress)
+  const easeP = gsap.parseEase("power4.inOut")(progress)
 
   const currW = rect.width + (finalW - rect.width) * easeP
   const currH = rect.height + (finalH - rect.height) * easeP
@@ -203,6 +181,7 @@ function renderCardZoom(progress: number) {
     width: currW,
     height: currH,
     gap: 0,
+    zIndex: 2 // Keep above room layer
   })
   gsap.set(card0, {
     width: currW,
@@ -210,22 +189,43 @@ function renderCardZoom(progress: number) {
     flex: 'none'
   })
 
+  // 2. ROOM LAYER ANIMATION (INDEPENDENT)
+  // Start coords exactly matching the hole
+  const startRoomLeft = rect.left + rect.width * (HOLE.centerX - HOLE.width / 2)
+  const startRoomTop = rect.top + rect.height * (HOLE.centerY - HOLE.height / 2)
+  const startRoomW = rect.width * HOLE.width
+  const startRoomH = rect.height * HOLE.height
+
+  // Final coords covering the screen with 10% overflow for mouse panning
+  const overScale = 1.10
+  const endRoomW = window.innerWidth * overScale
+  const endRoomH = window.innerHeight * overScale
+  const endRoomLeft = (window.innerWidth - endRoomW) / 2
+  const endRoomTop = (window.innerHeight - endRoomH) / 2
+
+  const currRoomLeft = startRoomLeft + (endRoomLeft - startRoomLeft) * easeP
+  const currRoomTop = startRoomTop + (endRoomTop - startRoomTop) * easeP
+  const currRoomW = startRoomW + (endRoomW - startRoomW) * easeP
+  const currRoomH = startRoomH + (endRoomH - startRoomH) * easeP
+
   const roomLayer = card0.querySelector('.room-layer') as HTMLElement
   const roomImg = card0.querySelector('.room-img') as HTMLElement
   
   if (roomLayer) {
     gsap.set(roomLayer, {
-      left: currW * (HOLE.centerX - HOLE.width / 2),
-      top: currH * (HOLE.centerY - HOLE.height / 2),
-      width: currW * HOLE.width,
-      height: currH * HOLE.height,
-      borderRadius: 10 - (10 * easeP)
+      position: 'fixed',
+      left: currRoomLeft,
+      top: currRoomTop,
+      width: currRoomW,
+      height: currRoomH,
+      borderRadius: 10 - (10 * easeP),
+      zIndex: 1 // Keep behind card frame
     })
   }
   
   if (roomImg) {
-    // Parallax effect: image scales down slightly from 1.2 to 1 as we zoom in
-    const imgScale = 1 + (0.2 * (1 - easeP))
+    // Parallax effect: image scales down slightly to 1.0 as we zoom in
+    const imgScale = 1.05 + (0.15 * (1 - easeP))
     gsap.set(roomImg, { scale: imgScale, transformOrigin: 'center center' })
   }
 
@@ -257,11 +257,14 @@ function enterCard() {
   })
   
   // Motion blur effect
-  if (cardsTrack.value) {
-    gsap.fromTo(cardsTrack.value, 
-      { filter: 'blur(0px)' }, 
-      { filter: 'blur(8px)', duration: 0.9, yoyo: true, repeat: 1, ease: 'power2.in' }
-    )
+  if (cardEls.value[0]) {
+    const roomLayer = cardEls.value[0].querySelector('.room-layer') as HTMLElement
+    if (roomLayer) {
+      gsap.fromTo(roomLayer, 
+        { filter: 'blur(0px)' }, 
+        { filter: 'blur(8px)', duration: 0.9, yoyo: true, repeat: 1, ease: 'power2.in' }
+      )
+    }
   }
 }
 
@@ -272,19 +275,22 @@ function exitCard() {
   
   window.removeEventListener('mousemove', handleMouseMove)
   
-  // Reset 3D transforms first smoothly
-  if (cardsTrack.value) {
-    gsap.to(cardsTrack.value, {
-      x: 0, y: 0,
-      duration: 0.8,
-      ease: "power3.out"
-    })
-    
-    // Motion blur effect for exiting
-    gsap.fromTo(cardsTrack.value, 
-      { filter: 'blur(0px)' }, 
-      { filter: 'blur(8px)', duration: 0.8, yoyo: true, repeat: 1, ease: 'power2.in' }
-    )
+  // Reset panning smoothly
+  if (cardEls.value[0]) {
+    const roomLayer = cardEls.value[0].querySelector('.room-layer') as HTMLElement
+    if (roomLayer) {
+      gsap.to(roomLayer, {
+        x: 0, y: 0,
+        duration: 0.8,
+        ease: "power3.out"
+      })
+      
+      // Motion blur effect for exiting
+      gsap.fromTo(roomLayer, 
+        { filter: 'blur(0px)' }, 
+        { filter: 'blur(8px)', duration: 0.8, yoyo: true, repeat: 1, ease: 'power2.in' }
+      )
+    }
   }
 
   const dummy = { p: currentZoomP }
@@ -304,30 +310,25 @@ function exitCard() {
 
 // ── Parallax POV (Camera Pan) ─────────────────────────────────────────────
 function handleMouseMove(e: MouseEvent) {
-  if (!isZoomed.value || !cardsTrack.value) return
+  if (!isZoomed.value || !cardEls.value[0]) return
   
+  const roomLayer = cardEls.value[0].querySelector('.room-layer') as HTMLElement
+  if (!roomLayer) return
+
   const nx = (e.clientX / window.innerWidth) - 0.5
   const ny = (e.clientY / window.innerHeight) - 0.5
   
-  // Calculate dynamic max pan so we can see all the way to the edges of the room
-  // without revealing the grey card borders.
-  const rect = getCardScreenRect()
-  const holeW_base = rect.width * HOLE.width
-  const holeH_base = rect.height * HOLE.height
-  const maxScale = Math.max(window.innerWidth / holeW_base, window.innerHeight / holeH_base) * 1.15
-  
-  const finalHoleW = rect.width * maxScale * HOLE.width
-  const finalHoleH = rect.height * maxScale * HOLE.height
-  
-  // Safe panning distance
-  const maxMoveX = Math.max(0, (finalHoleW - window.innerWidth) / 2 - 5)
-  const maxMoveY = Math.max(0, (finalHoleH - window.innerHeight) / 2 - 5)
+  // Since roomLayer is exactly 1.10x the screen size at full zoom,
+  // we have exactly 10% overflow. (5% on each side)
+  // Window innerWidth * 0.05 is the max we can pan.
+  const maxMoveX = window.innerWidth * 0.05
+  const maxMoveY = window.innerHeight * 0.05
 
-  // Full reach panning
+  // nx goes from -0.5 to 0.5
   const moveX = nx * -(maxMoveX * 2)
   const moveY = ny * -(maxMoveY * 2)
 
-  gsap.to(cardsTrack.value, {
+  gsap.to(roomLayer, {
     x: moveX,
     y: moveY,
     duration: 1.2,
