@@ -553,7 +553,7 @@ onUnmounted(() => {
   color: #111;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.6s ease, transform 0.2s ease;
+  transition: opacity 0.3s ease, transform 0.2s ease;
 }
 
 .hotspot svg {
@@ -568,6 +568,8 @@ onUnmounted(() => {
 .room-layer.is-zoomed .hotspot {
   opacity: 1;
   pointer-events: all;
+  transition: opacity 0.8s ease, transform 0.2s ease;
+  transition-delay: 1.5s; /* Wait for zoom animation to almost finish */
 }
 
 .hotspot::before, .hotspot::after {
