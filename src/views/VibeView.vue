@@ -29,7 +29,7 @@
       <!-- Independent room layer that can scale beautifully without being constrained by the grey card -->
       <div class="room-layer" :class="{ 'is-zoomed': isZoomed }">
         <div class="parallax-container" ref="parallaxContainer">
-          <img :src="CARDS[0].room" class="room-img" draggable="false" />
+          <img :src="CARDS[activeCardIndex].room" class="room-img" draggable="false" />
           
           <!-- Hotspots -->
           <div 
@@ -47,8 +47,16 @@
         </div>
       </div>
 
+      <!-- Navigation Arrows -->
+      <button class="nav-arrow prev" v-show="!isZoomed && activeCardIndex > 0" @click.stop="prevCard">
+        <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+      </button>
+      <button class="nav-arrow next" v-show="!isZoomed && activeCardIndex < CARDS.length - 1" @click.stop="nextCard">
+        <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+      </button>
+
       <!-- Cards track — uses CSS transform to slide siblings in -->
-      <div class="cards-track" ref="cardsTrack">
+      <div class="cards-track" ref="cardsTrack" :class="{ 'is-zoomed': isZoomed }">
         <div
           v-for="(card, i) in CARDS"
           :key="card.id"
@@ -87,7 +95,9 @@ gsap.registerPlugin(ScrollTrigger)
 
 // ── Card data ─────────────────────────────────────────────────────────────
 const CARDS = [
-  { id: 'doctor', label: 'THE DOCTOR', category: 'Healthcare', room: '/images/ruangan dokter.png' },
+  { id: 'doctor1', label: 'THE DOCTOR', category: 'Healthcare', room: '/images/ruangan dokter.png' },
+  { id: 'doctor2', label: 'THE DOCTOR 2', category: 'Healthcare', room: '/images/ruangan dokter.png' },
+  { id: 'doctor3', label: 'THE DOCTOR 3', category: 'Healthcare', room: '/images/ruangan dokter.png' }
 ]
 
 const HOTSPOTS = [
@@ -147,7 +157,30 @@ function startIdleAnimation() {
 }
 const showCarousel   = ref(false)
 const isZoomed       = ref(false)
+const activeCardIndex = ref(0)
+const CARD_GAP = 100 // px gap between cards in slider
 let currentZoomP     = 0
+let rafId            = 0
+
+function nextCard() {
+  if (activeCardIndex.value < CARDS.length - 1) {
+    activeCardIndex.value++
+    updateSlider()
+  }
+}
+
+function prevCard() {
+  if (activeCardIndex.value > 0) {
+    activeCardIndex.value--
+    updateSlider()
+  }
+}
+
+function updateSlider() {
+  const rect = getCardScreenRect()
+  const trackX = -activeCardIndex.value * (rect.width + CARD_GAP)
+  gsap.to(cardsTrack.value, { x: trackX, duration: 0.6, ease: "power3.out" })
+}
 
 // ── State ─────────────────────────────────────────────────────────────────
 const images: HTMLImageElement[] = []
@@ -155,7 +188,6 @@ let ctx: CanvasRenderingContext2D | null = null
 let currentFrame = 0
 let targetFrame  = 0
 let lenis: Lenis | null = null
-let rafId = 0
 
 // ── Calculate where the card appears on-screen from the canvas cover-fit ─
 function getCardScreenRect() {
@@ -227,19 +259,28 @@ function renderCardZoom(progress: number) {
   const currLeft = rect.left + (finalLeft - rect.left) * easeP
   const currTop = rect.top + (finalTop - rect.top) * easeP
 
+  const currentGap = CARD_GAP * (1 - easeP)
+  const trackX = -activeCardIndex.value * (currW + currentGap)
+
   gsap.set(track, {
     position: 'fixed',
     left: currLeft,
     top: currTop,
-    width: currW,
+    width: 'max-content',
     height: currH,
-    gap: 0,
+    gap: currentGap,
+    x: trackX,
     zIndex: 2
   })
-  gsap.set(card0, {
-    width: currW,
-    height: currH,
-    flex: 'none'
+  
+  cardEls.value.forEach(el => {
+    if (el) {
+      gsap.set(el, {
+        width: currW,
+        height: currH,
+        flex: 'none'
+      })
+    }
   })
 
   const startRoomLeft = rect.left + rect.width * (HOLE.centerX - HOLE.width / 2)
@@ -509,8 +550,12 @@ onUnmounted(() => {
 .cards-track {
   position: fixed;
   display: flex;
-  gap: 0;
   pointer-events: all;
+  transition: pointer-events 0.3s;
+}
+
+.cards-track.is-zoomed {
+  pointer-events: none; /* Let clicks pass through to the room layer */
 }
 
 .card-slot {
@@ -610,6 +655,41 @@ onUnmounted(() => {
   0% { width: 100%; height: 100%; opacity: 1; }
   100% { width: 250%; height: 250%; opacity: 0; }
 }
+
+/* ── Navigation Arrows ────────────────────────── */
+.nav-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 20;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: white;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(10px);
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  pointer-events: all;
+}
+
+.nav-arrow svg {
+  width: 24px;
+  height: 24px;
+}
+
+.nav-arrow:hover {
+  background: rgba(255, 255, 255, 0.15);
+  transform: translateY(-50%) scale(1.15);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.nav-arrow.prev { left: 40px; }
+.nav-arrow.next { right: 40px; }
 
 .card-frame {
   position: absolute;
