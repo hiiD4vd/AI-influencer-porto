@@ -288,10 +288,19 @@ function renderCardZoom(progress: number) {
     }
   })
 
-  const activeRoomLayer = cardEls.value[activeCardIndex.value]?.querySelector('.room-layer') as HTMLElement
   const activeParallax = parallaxContainers.value[activeCardIndex.value]
 
   if (easeP > 0) {
+    const activeRoomLayer = cardEls.value[activeCardIndex.value]?.querySelector('.room-layer') as HTMLElement
+    
+    // Clear props for all OTHER room layers just to be safe
+    cardEls.value.forEach((card, idx) => {
+      if (idx !== activeCardIndex.value) {
+        const rl = card?.querySelector('.room-layer')
+        if (rl) gsap.set(rl, { clearProps: 'all' })
+      }
+    })
+
     const startRoomLeft = rect.left + rect.width * (HOLE.centerX - HOLE.width / 2)
     const startRoomTop = rect.top + rect.height * (HOLE.centerY - HOLE.height / 2)
     const startRoomW = rect.width * HOLE.width
@@ -459,19 +468,14 @@ function setupScroll() {
   
   lenis.on('scroll', ({ scroll }: { scroll: number }) => {
     if (isZoomed.value) return
-    let videoProgress = Math.max(0, Math.min(1, scroll / videoScrollHeight))
-    targetFrame = Math.floor(videoProgress * (TOTAL_FRAMES - 1))
+    targetFrame = Math.floor((Math.max(0, Math.min(1, scroll / videoScrollHeight))) * (TOTAL_FRAMES - 1))
     
     if (targetFrame >= TOTAL_FRAMES - 1) {
-      if (!showCarousel.value) {
-        showCarousel.value = true
-        renderCardZoom(0)
-      }
+      showCarousel.value = true
+      renderCardZoom(currentZoomP)
     } else {
-      if (showCarousel.value) {
-        showCarousel.value = false
-        if (canvasEl.value) canvasEl.value.style.opacity = '1'
-      }
+      showCarousel.value = false
+      renderCardZoom(0)
     }
   })
 
@@ -713,35 +717,31 @@ onUnmounted(() => {
 .card-frame {
   position: absolute;
   inset: 0;
-  z-index: 2;
   width: 100%;
   height: 100%;
-  object-fit: fill;
+  object-fit: cover;
   pointer-events: none;
-  display: block;
-  transition: filter 0.2s;
+  z-index: 2; /* Keep above room layer */
 }
 
 /* ── Enter button ─────────────────────────────── */
 .enter-btn {
   position: absolute;
-  bottom: -60px;
+  bottom: 8%;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 10;
   background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   color: white;
-  padding: 10px 24px;
+  padding: 10px 30px;
   border-radius: 30px;
-  font-family: 'Inter', sans-serif;
-  font-size: 0.9rem;
-  letter-spacing: 0.1em;
-  font-weight: 500;
+  font-family: inherit;
+  font-weight: 600;
+  letter-spacing: 2px;
   cursor: pointer;
-  pointer-events: auto;
+  backdrop-filter: blur(10px);
   transition: all 0.3s ease;
+  z-index: 3; /* Keep above frame */
   box-shadow: 0 4px 12px rgba(0,0,0,0.2);
 }
 .enter-btn:hover {
