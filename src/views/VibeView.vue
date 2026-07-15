@@ -245,8 +245,8 @@ function enterCard() {
   const dummy = { p: 0 }
   gsap.to(dummy, {
     p: 1,
-    duration: 1.6,
-    ease: "power2.inOut",
+    duration: 1.8,
+    ease: "power4.inOut",
     onUpdate: () => {
       currentZoomP = dummy.p
       renderCardZoom(currentZoomP)
@@ -255,6 +255,14 @@ function enterCard() {
       window.addEventListener('mousemove', handleMouseMove)
     }
   })
+  
+  // Motion blur effect
+  if (cardsTrack.value) {
+    gsap.fromTo(cardsTrack.value, 
+      { filter: 'blur(0px)' }, 
+      { filter: 'blur(8px)', duration: 0.9, yoyo: true, repeat: 1, ease: 'power2.in' }
+    )
+  }
 }
 
 // ── Exit animation ────────────────────────────────────────────────────────
@@ -270,15 +278,21 @@ function exitCard() {
       x: 0, y: 0,
       rotationX: 0, rotationY: 0,
       duration: 0.8,
-      ease: "power2.out"
+      ease: "power3.out"
     })
+    
+    // Motion blur effect for exiting
+    gsap.fromTo(cardsTrack.value, 
+      { filter: 'blur(0px)' }, 
+      { filter: 'blur(8px)', duration: 0.8, yoyo: true, repeat: 1, ease: 'power2.in' }
+    )
   }
 
   const dummy = { p: currentZoomP }
   gsap.to(dummy, {
     p: 0,
-    duration: 1.4,
-    ease: "power2.inOut",
+    duration: 1.6,
+    ease: "power4.inOut",
     onUpdate: () => {
       currentZoomP = dummy.p
       renderCardZoom(currentZoomP)
@@ -542,37 +556,39 @@ onUnmounted(() => {
 
 /* ── Exit button ──────────────────────────────── */
 .exit-btn {
-  position: absolute;
-  top: 40px;
-  left: 40px;
+  position: fixed;
+  bottom: 40px;
+  left: 50%;
   z-index: 50;
   background: rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.2);
   color: white;
-  padding: 10px 20px;
+  padding: 10px 24px;
   border-radius: 30px;
   font-family: 'Inter', sans-serif;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   letter-spacing: 0.1em;
   font-weight: 500;
   cursor: pointer;
   pointer-events: none;
   opacity: 0;
-  transform: translateY(-10px);
+  transform: translateX(-50%) translateY(20px);
   transition: all 0.4s ease;
   display: flex;
   align-items: center;
   gap: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
 }
 .exit-btn:hover {
   background: rgba(0, 0, 0, 0.6);
   border-color: rgba(255, 255, 255, 0.4);
+  transform: translateX(-50%) scale(1.05);
 }
 .exit-btn.is-visible {
   opacity: 1;
   pointer-events: auto;
-  transform: translateY(0);
+  transform: translateX(-50%) translateY(0);
 }
 
 /* ── Transitions ──────────────────────────────── */
