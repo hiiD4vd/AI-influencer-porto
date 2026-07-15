@@ -578,8 +578,8 @@ onUnmounted(() => {
 .room-layer.is-zoomed .hotspot {
   opacity: 1;
   pointer-events: all;
-  transition: opacity 0.8s ease, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.3s ease, color 0.3s ease;
-  transition-delay: 1.5s; /* Wait for zoom animation to almost finish */
+  /* Only delay the opacity fade-in, do not delay hover transforms */
+  transition: opacity 0.8s ease 1.2s, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .hotspot::before, .hotspot::after {
