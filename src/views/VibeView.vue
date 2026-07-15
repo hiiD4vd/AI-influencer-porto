@@ -275,7 +275,7 @@ function renderCardZoom(progress: number) {
     top: currTop,
     width: 'max-content',
     height: currH,
-    gap: baseGap,
+    gap: `${baseGap}px`,
     x: trackX,
     zIndex: 2
   })
