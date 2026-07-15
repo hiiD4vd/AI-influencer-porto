@@ -55,11 +55,6 @@
       </div>
     </div>
 
-    <!-- Portal overlay for zoom-into-room effect -->
-    <div class="portal-overlay" ref="portalOverlay">
-      <img :src="activeRoomSrc" class="portal-room-img" ref="portalRoom" />
-      <button class="portal-close" @click="closePortal">✕</button>
-    </div>
   </div>
 </template>
 
@@ -84,21 +79,22 @@ const FRAME_PATH = (i: number) => `/frames/hero/frame_${String(i).padStart(4, '0
 
 // ── Last frame (idcard after video.png) exact pixel bounds within the PNG ─
 // PNG size: 4320 × 3072
-// Card position measured from PNG: left~36%, top~25%, width~21%, height~49%
+// Card position accurately measured from pixels
 const LAST_FRAME_PNG = { w: 4320, h: 3072 }
 const CARD_IN_PNG = {
-  left:   0.368,   // card left edge as fraction of PNG width
-  top:    0.248,   // card top edge as fraction of PNG height
-  width:  0.215,   // card width as fraction of PNG width
-  height: 0.490,   // card height as fraction of PNG height
+  left:   0.4111,
+  top:    0.2891,
+  width:  0.1759,
+  height: 0.4193,
 }
 
 // Hole position WITHIN the card PNG (idcard polos.png)
+// Accurate measurement from alpha channel
 const HOLE = {
-  centerX: 0.500,
-  centerY: 0.735,
-  width:   0.885,
-  height:  0.330,
+  centerX: 0.5078,
+  centerY: 0.6750,
+  width:   0.8756,
+  height:  0.4153,
 }
 
 // ── Refs ──────────────────────────────────────────────────────────────────
@@ -108,14 +104,9 @@ const scrollContainer = ref<HTMLElement | null>(null)
 const carouselScene  = ref<HTMLElement | null>(null)
 const cardsTrack     = ref<HTMLElement | null>(null)
 const cardEls        = ref<HTMLElement[]>([])
-const portalOverlay  = ref<HTMLElement | null>(null)
-const portalRoom     = ref<HTMLImageElement | null>(null)
-
 const isLoading      = ref(true)
 const loadProgress   = ref(0)
 const showCarousel   = ref(false)
-const activeRoomSrc  = ref('')
-const isZoomed       = ref(false)
 
 // ── State ─────────────────────────────────────────────────────────────────
 const images: HTMLImageElement[] = []
@@ -162,141 +153,81 @@ function drawFrame(index: number) {
 // ── Render loop ───────────────────────────────────────────────────────────
 function tick() {
   rafId = requestAnimationFrame(tick)
-  if (showCarousel.value) return
-  currentFrame += (targetFrame - currentFrame) * 0.12
-  drawFrame(Math.round(currentFrame))
-  if (targetFrame >= TOTAL_FRAMES - 1 && Math.abs(currentFrame - targetFrame) < 0.5) {
-    triggerCarousel()
+  // Don't render frames if we are fully zoomed in, but keep updating if we are transitioning
+  if (targetFrame < TOTAL_FRAMES - 1) {
+    currentFrame += (targetFrame - currentFrame) * 0.12
+    drawFrame(Math.round(currentFrame))
+  } else if (currentFrame < TOTAL_FRAMES - 1) {
+    currentFrame += (targetFrame - currentFrame) * 0.12
+    drawFrame(Math.round(currentFrame))
   }
 }
 
-// ── Trigger carousel — SEAMLESS ───────────────────────────────────────────
-async function triggerCarousel() {
-  if (showCarousel.value) return
+// ── Zoom logic based on scroll ────────────────────────────────────────────
+function updateZoom(progress: number) {
+  if (!cardsTrack.value || !cardEls.value[0]) return
 
-  // 1. Calculate exact card rect matching the last frame's canvas rendering
+  if (progress === 0 && targetFrame < TOTAL_FRAMES - 1) {
+    showCarousel.value = false
+    if (canvasEl.value) canvasEl.value.style.opacity = '1'
+    return
+  }
+
+  showCarousel.value = true
+  const card0 = cardEls.value[0]
+  const track = cardsTrack.value
+
+  // Base rect matching canvas EXACTLY
   const rect = getCardScreenRect()
 
-  // 2. Show carousel DOM (still invisible until positioned)
-  showCarousel.value = true
-  await nextTick()
+  // Final rect where hole is centered and fills screen
+  const holeW = rect.width * HOLE.width
+  const holeH = rect.height * HOLE.height
+  const maxScale = Math.max(window.innerWidth / holeW, window.innerHeight / holeH) * 1.05
 
-  const track = cardsTrack.value
-  const card0 = cardEls.value[0]
-  if (!track || !card0) return
+  const finalW = rect.width * maxScale
+  const finalH = rect.height * maxScale
+  const finalLeft = window.innerWidth / 2 - finalW * HOLE.centerX
+  const finalTop  = window.innerHeight / 2 - finalH * HOLE.centerY
 
-  // 3. INSTANTLY position HTML card at EXACT same position as the canvas card
-  //    NO animation, NO transition — user sees zero difference
+  const easeP = gsap.parseEase("power3.inOut")(progress)
+
+  const currW = rect.width + (finalW - rect.width) * easeP
+  const currH = rect.height + (finalH - rect.height) * easeP
+  const currLeft = rect.left + (finalLeft - rect.left) * easeP
+  const currTop = rect.top + (finalTop - rect.top) * easeP
+
   gsap.set(track, {
     position: 'fixed',
-    left:   rect.left,
-    top:    rect.top,
-    width:  rect.width,
-    height: rect.height,
-    gap:    0,
+    left: currLeft,
+    top: currTop,
+    width: currW,
+    height: currH,
+    gap: 0,
   })
   gsap.set(card0, {
-    width:  rect.width,
-    height: rect.height,
-    flex:   'none',
+    width: currW,
+    height: currH,
+    flex: 'none'
   })
 
-  // Sync room-layer to match hole in card
   const roomLayer = card0.querySelector('.room-layer') as HTMLElement
   if (roomLayer) {
-    const holeLeft   = rect.width  * (HOLE.centerX - HOLE.width  / 2)
-    const holeTop    = rect.height * (HOLE.centerY - HOLE.height / 2)
-    const holeW      = rect.width  * HOLE.width
-    const holeH      = rect.height * HOLE.height
-    gsap.set(roomLayer, { left: holeLeft, top: holeTop, width: holeW, height: holeH, borderRadius: 10 })
+    gsap.set(roomLayer, {
+      left: currW * (HOLE.centerX - HOLE.width / 2),
+      top: currH * (HOLE.centerY - HOLE.height / 2),
+      width: currW * HOLE.width,
+      height: currH * HOLE.height,
+      borderRadius: 10 - (10 * easeP)
+    })
   }
 
-  // 4. Canvas stays visible underneath — background stays matching.
-  //    No fade, no hide, nothing jarring. Just stop the render loop.
-  lenis?.destroy()
-  ScrollTrigger.killAll()
+  // Fade canvas to hide the background as we zoom in (0.1 to 0.6 of the zoom progress)
+  const canvasOpacity = 1 - Math.min(1, Math.max(0, (easeP - 0.1) / 0.5))
+  if (canvasEl.value) canvasEl.value.style.opacity = canvasOpacity.toString()
 }
 
-// ── Go back ───────────────────────────────────────────────────────────────
-function goBack() {
-  showCarousel.value = false
-  gsap.set(canvasEl.value, { opacity: 1 })
-  targetFrame  = TOTAL_FRAMES - 2
-  currentFrame = TOTAL_FRAMES - 2
-  setupScroll()
-}
 
-// ── Enter portal (zoom into room) ─────────────────────────────────────────
-async function enterCard(index: number) {
-  if (isZoomed.value) return
-  activeRoomSrc.value = CARDS[index].room
-  isZoomed.value = true
-  await nextTick()
-
-  const card = cardEls.value[index]
-  if (!card || !portalOverlay.value || !portalRoom.value) return
-
-  const rect = card.getBoundingClientRect()
-  const cW = rect.width, cH = rect.height
-  const holeCX = rect.left + cW * HOLE.centerX
-  const holeCY = rect.top  + cH * HOLE.centerY
-  const holeW  = cW * HOLE.width
-  const holeH  = cH * HOLE.height
-
-  gsap.set(portalOverlay.value, {
-    display: 'block',
-    position: 'fixed',
-    left:   holeCX - holeW / 2,
-    top:    holeCY - holeH / 2,
-    width:  holeW,
-    height: holeH,
-    borderRadius: 10,
-    overflow: 'hidden',
-    zIndex: 10000,
-  })
-
-  const scaleX = window.innerWidth / holeW
-  const scaleY = window.innerHeight / holeH
-  const s = Math.max(scaleX, scaleY) * 1.05
-
-  gsap.to(portalOverlay.value, {
-    left:         holeCX - holeCX * s,
-    top:          holeCY - holeCY * s,
-    width:        holeW  * s,
-    height:       holeH  * s,
-    borderRadius: 0,
-    duration: 1.2,
-    ease: 'power3.inOut',
-  })
-}
-
-// ── Close portal ──────────────────────────────────────────────────────────
-function closePortal() {
-  if (!portalOverlay.value) return
-  const card = cardEls.value[0]
-  if (!card) { isZoomed.value = false; return }
-
-  const rect = card.getBoundingClientRect()
-  const cW = rect.width, cH = rect.height
-  const holeCX = rect.left + cW * HOLE.centerX
-  const holeCY = rect.top  + cH * HOLE.centerY
-  const holeW  = cW * HOLE.width
-  const holeH  = cH * HOLE.height
-
-  gsap.to(portalOverlay.value, {
-    left: holeCX - holeW / 2,
-    top:  holeCY - holeH / 2,
-    width: holeW,
-    height: holeH,
-    borderRadius: 10,
-    duration: 0.85,
-    ease: 'power3.inOut',
-    onComplete: () => {
-      gsap.set(portalOverlay.value!, { display: 'none' })
-      isZoomed.value = false
-    },
-  })
-}
 
 // ── Preload ───────────────────────────────────────────────────────────────
 function preloadFrames(): Promise<void> {
@@ -326,20 +257,31 @@ function resizeCanvas() {
 // ── Setup scroll ──────────────────────────────────────────────────────────
 function setupScroll() {
   if (!scrollContainer.value || !viewRoot.value) return
-  const totalHeight = window.innerHeight + TOTAL_FRAMES * SCROLL_PX_PER_FRAME
+  
+  const videoScrollHeight = TOTAL_FRAMES * SCROLL_PX_PER_FRAME
+  const zoomScrollHeight = 1500 // 1500px of scrolling for the zoom effect
+  const totalHeight = window.innerHeight + videoScrollHeight + zoomScrollHeight
   scrollContainer.value.style.height = `${totalHeight}px`
 
   lenis?.destroy()
   lenis = new Lenis({
     wrapper: viewRoot.value,
     content: scrollContainer.value,
-    duration: 1.4,
+    duration: 1.2,
     easing: (t: number) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
     smoothWheel: true,
   })
+  
   lenis.on('scroll', ({ scroll }: { scroll: number }) => {
-    const progress = Math.max(0, Math.min(1, scroll / (TOTAL_FRAMES * SCROLL_PX_PER_FRAME)))
-    targetFrame = Math.floor(progress * (TOTAL_FRAMES - 1))
+    // Phase 1: Video scrubbing (0 to videoScrollHeight)
+    let videoProgress = Math.min(1, scroll / videoScrollHeight)
+    targetFrame = Math.floor(videoProgress * (TOTAL_FRAMES - 1))
+    
+    // Phase 2: Zoom in (videoScrollHeight to total)
+    let zoomProgress = Math.max(0, Math.min(1, (scroll - videoScrollHeight) / zoomScrollHeight))
+    
+    // Update zoom logic
+    updateZoom(zoomProgress)
   })
 
   const run = (t: number) => { lenis?.raf(t); requestAnimationFrame(run) }
