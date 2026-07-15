@@ -47,6 +47,14 @@
           </button>
         </div>
       </div>
+      
+      <!-- Exit button (appears when zoomed) -->
+      <button class="exit-btn" @click.stop="exitCard" :class="{ 'is-visible': isZoomed }">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <path d="M19 12H5M5 12L12 19M5 12L12 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        BACK
+      </button>
     </div>
 
   </div>
@@ -173,8 +181,8 @@ function renderCardZoom(progress: number) {
   const holeW = rect.width * HOLE.width
   const holeH = rect.height * HOLE.height
   
-  // Scale multiplied by 1.35 to ensure the grey card borders completely disappear
-  const maxScale = Math.max(window.innerWidth / holeW, window.innerHeight / holeH) * 1.35
+  // Scale reduced to 1.15 so it's not too zoomed, but just enough to hide grey borders
+  const maxScale = Math.max(window.innerWidth / holeW, window.innerHeight / holeH) * 1.15
 
   const finalW = rect.width * maxScale
   const finalH = rect.height * maxScale
@@ -242,7 +250,66 @@ function enterCard() {
     onUpdate: () => {
       currentZoomP = dummy.p
       renderCardZoom(currentZoomP)
+    },
+    onComplete: () => {
+      window.addEventListener('mousemove', handleMouseMove)
     }
+  })
+}
+
+// ── Exit animation ────────────────────────────────────────────────────────
+function exitCard() {
+  if (!isZoomed.value) return
+  isZoomed.value = false
+  
+  window.removeEventListener('mousemove', handleMouseMove)
+  
+  // Reset 3D transforms first smoothly
+  if (cardsTrack.value) {
+    gsap.to(cardsTrack.value, {
+      x: 0, y: 0,
+      rotationX: 0, rotationY: 0,
+      duration: 0.8,
+      ease: "power2.out"
+    })
+  }
+
+  const dummy = { p: currentZoomP }
+  gsap.to(dummy, {
+    p: 0,
+    duration: 1.4,
+    ease: "power2.inOut",
+    onUpdate: () => {
+      currentZoomP = dummy.p
+      renderCardZoom(currentZoomP)
+    },
+    onComplete: () => {
+      lenis?.start() // Resume scrolling
+    }
+  })
+}
+
+// ── 3D Parallax POV ───────────────────────────────────────────────────────
+function handleMouseMove(e: MouseEvent) {
+  if (!isZoomed.value || !cardsTrack.value) return
+  
+  const nx = (e.clientX / window.innerWidth) - 0.5
+  const ny = (e.clientY / window.innerHeight) - 0.5
+  
+  // Subtle 3D rotation and pan
+  const rotateX = ny * -8
+  const rotateY = nx * 12
+  const moveX = nx * -40
+  const moveY = ny * -40
+
+  gsap.to(cardsTrack.value, {
+    x: moveX,
+    y: moveY,
+    rotationX: rotateX,
+    rotationY: rotateY,
+    transformPerspective: 1000,
+    duration: 0.8,
+    ease: "power2.out"
   })
 }
 
@@ -471,6 +538,41 @@ onUnmounted(() => {
   opacity: 0;
   pointer-events: none;
   transform: translateX(-50%) translateY(20px);
+}
+
+/* ── Exit button ──────────────────────────────── */
+.exit-btn {
+  position: absolute;
+  top: 40px;
+  left: 40px;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 30px;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.85rem;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+  cursor: pointer;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: all 0.4s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.exit-btn:hover {
+  background: rgba(0, 0, 0, 0.6);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.exit-btn.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 /* ── Transitions ──────────────────────────────── */
