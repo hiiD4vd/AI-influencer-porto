@@ -40,6 +40,11 @@
           </div>
           <!-- Card frame with transparent hole on top -->
           <img src="/images/idcard polos.png" class="card-frame" draggable="false" />
+          
+          <!-- Enter button -->
+          <button class="enter-btn" @click.stop="enterCard" :class="{ 'is-zoomed': isZoomed }">
+            ENTER
+          </button>
         </div>
       </div>
     </div>
@@ -96,6 +101,8 @@ const cardEls        = ref<HTMLElement[]>([])
 const isLoading      = ref(true)
 const loadProgress   = ref(0)
 const showCarousel   = ref(false)
+const isZoomed       = ref(false)
+let currentZoomP     = 0
 
 // ── State ─────────────────────────────────────────────────────────────────
 const images: HTMLImageElement[] = []
@@ -152,17 +159,10 @@ function tick() {
   }
 }
 
-// ── Zoom logic based on scroll ────────────────────────────────────────────
-function updateZoom(progress: number) {
+// ── Zoom logic based on progress ──────────────────────────────────────────
+function renderCardZoom(progress: number) {
   if (!cardsTrack.value || !cardEls.value[0]) return
 
-  if (progress === 0 && targetFrame < TOTAL_FRAMES - 1) {
-    showCarousel.value = false
-    if (canvasEl.value) canvasEl.value.style.opacity = '1'
-    return
-  }
-
-  showCarousel.value = true
   const card0 = cardEls.value[0]
   const track = cardsTrack.value
 
@@ -172,7 +172,9 @@ function updateZoom(progress: number) {
   // Final rect where hole is centered and fills screen
   const holeW = rect.width * HOLE.width
   const holeH = rect.height * HOLE.height
-  const maxScale = Math.max(window.innerWidth / holeW, window.innerHeight / holeH) * 1.05
+  
+  // Scale multiplied by 1.35 to ensure the grey card borders completely disappear
+  const maxScale = Math.max(window.innerWidth / holeW, window.innerHeight / holeH) * 1.35
 
   const finalW = rect.width * maxScale
   const finalH = rect.height * maxScale
@@ -201,6 +203,8 @@ function updateZoom(progress: number) {
   })
 
   const roomLayer = card0.querySelector('.room-layer') as HTMLElement
+  const roomImg = card0.querySelector('.room-img') as HTMLElement
+  
   if (roomLayer) {
     gsap.set(roomLayer, {
       left: currW * (HOLE.centerX - HOLE.width / 2),
@@ -210,10 +214,36 @@ function updateZoom(progress: number) {
       borderRadius: 10 - (10 * easeP)
     })
   }
+  
+  if (roomImg) {
+    // Parallax effect: image scales down slightly from 1.2 to 1 as we zoom in
+    const imgScale = 1 + (0.2 * (1 - easeP))
+    gsap.set(roomImg, { scale: imgScale, transformOrigin: 'center center' })
+  }
 
-  // Fade canvas to hide the background as we zoom in (0.1 to 0.6 of the zoom progress)
+  // Fade canvas to hide the background as we zoom in
   const canvasOpacity = 1 - Math.min(1, Math.max(0, (easeP - 0.1) / 0.5))
   if (canvasEl.value) canvasEl.value.style.opacity = canvasOpacity.toString()
+}
+
+// ── Trigger enter animation ───────────────────────────────────────────────
+function enterCard() {
+  if (isZoomed.value) return
+  isZoomed.value = true
+  
+  // Stop scrolling
+  lenis?.stop()
+  
+  const dummy = { p: 0 }
+  gsap.to(dummy, {
+    p: 1,
+    duration: 1.6,
+    ease: "power2.inOut",
+    onUpdate: () => {
+      currentZoomP = dummy.p
+      renderCardZoom(currentZoomP)
+    }
+  })
 }
 
 
@@ -248,8 +278,7 @@ function setupScroll() {
   if (!scrollContainer.value || !viewRoot.value) return
   
   const videoScrollHeight = TOTAL_FRAMES * SCROLL_PX_PER_FRAME
-  const zoomScrollHeight = 1500 // 1500px of scrolling for the zoom effect
-  const totalHeight = window.innerHeight + videoScrollHeight + zoomScrollHeight
+  const totalHeight = window.innerHeight + videoScrollHeight
   scrollContainer.value.style.height = `${totalHeight}px`
 
   lenis?.destroy()
@@ -262,15 +291,23 @@ function setupScroll() {
   })
   
   lenis.on('scroll', ({ scroll }: { scroll: number }) => {
+    if (isZoomed.value) return // Disable video scrub once zoomed
+    
     // Phase 1: Video scrubbing (0 to videoScrollHeight)
-    let videoProgress = Math.min(1, scroll / videoScrollHeight)
+    let videoProgress = Math.max(0, Math.min(1, scroll / videoScrollHeight))
     targetFrame = Math.floor(videoProgress * (TOTAL_FRAMES - 1))
     
-    // Phase 2: Zoom in (videoScrollHeight to total)
-    let zoomProgress = Math.max(0, Math.min(1, (scroll - videoScrollHeight) / zoomScrollHeight))
-    
-    // Update zoom logic
-    updateZoom(zoomProgress)
+    if (targetFrame >= TOTAL_FRAMES - 1) {
+      if (!showCarousel.value) {
+        showCarousel.value = true
+        renderCardZoom(0)
+      }
+    } else {
+      if (showCarousel.value) {
+        showCarousel.value = false
+        if (canvasEl.value) canvasEl.value.style.opacity = '1'
+      }
+    }
   })
 
   const run = (t: number) => { lenis?.raf(t); requestAnimationFrame(run) }
@@ -402,6 +439,38 @@ onUnmounted(() => {
   pointer-events: none;
   display: block;
   transition: filter 0.2s;
+}
+
+/* ── Enter button ─────────────────────────────── */
+.enter-btn {
+  position: absolute;
+  bottom: 8%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  padding: 10px 24px;
+  border-radius: 30px;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.9rem;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+.enter-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  transform: translateX(-50%) scale(1.05);
+}
+.enter-btn.is-zoomed {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(20px);
 }
 
 /* ── Transitions ──────────────────────────────── */
