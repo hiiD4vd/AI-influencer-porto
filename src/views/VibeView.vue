@@ -158,7 +158,7 @@ function startIdleAnimation() {
 const showCarousel   = ref(false)
 const isZoomed       = ref(false)
 const activeCardIndex = ref(0)
-const CARD_GAP = 100 // px gap between cards in slider
+const sliderProxy = { index: 0 }
 let currentZoomP     = 0
 let rafId            = 0
 
@@ -177,9 +177,14 @@ function prevCard() {
 }
 
 function updateSlider() {
-  const rect = getCardScreenRect()
-  const trackX = -activeCardIndex.value * (rect.width + CARD_GAP)
-  gsap.to(cardsTrack.value, { x: trackX, duration: 0.6, ease: "power3.out" })
+  gsap.to(sliderProxy, {
+    index: activeCardIndex.value,
+    duration: 0.8,
+    ease: "power3.inOut",
+    onUpdate: () => {
+      renderCardZoom(currentZoomP)
+    }
+  })
 }
 
 // ── State ─────────────────────────────────────────────────────────────────
@@ -237,6 +242,7 @@ function tick() {
 
 // ── Zoom logic based on progress ──────────────────────────────────────────
 function renderCardZoom(progress: number) {
+  currentZoomP = progress
   if (!cardsTrack.value || !cardEls.value[0]) return
 
   const card0 = cardEls.value[0]
@@ -259,8 +265,9 @@ function renderCardZoom(progress: number) {
   const currLeft = rect.left + (finalLeft - rect.left) * easeP
   const currTop = rect.top + (finalTop - rect.top) * easeP
 
-  const currentGap = CARD_GAP * (1 - easeP)
-  const trackX = -activeCardIndex.value * (currW + currentGap)
+  // The gap between cards is exactly enough to make one card per screen
+  const baseGap = window.innerWidth - rect.width
+  const trackX = -sliderProxy.index * (currW + baseGap)
 
   gsap.set(track, {
     position: 'fixed',
@@ -268,7 +275,7 @@ function renderCardZoom(progress: number) {
     top: currTop,
     width: 'max-content',
     height: currH,
-    gap: currentGap,
+    gap: baseGap,
     x: trackX,
     zIndex: 2
   })
