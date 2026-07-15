@@ -309,11 +309,23 @@ function handleMouseMove(e: MouseEvent) {
   const nx = (e.clientX / window.innerWidth) - 0.5
   const ny = (e.clientY / window.innerHeight) - 0.5
   
-  // Natural camera pan (translate only, no fake 3D rotation)
-  // Max scale is 1.15, meaning we have about 15% extra space.
-  // 15% of a 1920 screen is ~288px, so we can safely pan +/- 120px.
-  const moveX = nx * -180
-  const moveY = ny * -100
+  // Calculate dynamic max pan so we can see all the way to the edges of the room
+  // without revealing the grey card borders.
+  const rect = getCardScreenRect()
+  const holeW_base = rect.width * HOLE.width
+  const holeH_base = rect.height * HOLE.height
+  const maxScale = Math.max(window.innerWidth / holeW_base, window.innerHeight / holeH_base) * 1.15
+  
+  const finalHoleW = rect.width * maxScale * HOLE.width
+  const finalHoleH = rect.height * maxScale * HOLE.height
+  
+  // Safe panning distance
+  const maxMoveX = Math.max(0, (finalHoleW - window.innerWidth) / 2 - 5)
+  const maxMoveY = Math.max(0, (finalHoleH - window.innerHeight) / 2 - 5)
+
+  // Full reach panning
+  const moveX = nx * -(maxMoveX * 2)
+  const moveY = ny * -(maxMoveY * 2)
 
   gsap.to(cardsTrack.value, {
     x: moveX,
