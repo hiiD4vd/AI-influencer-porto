@@ -21,20 +21,10 @@
     </Transition>
 
     <!-- Scroll container -->
-    <div class="scroll-container" ref="scrollContainer" v-show="!showCarousel"></div>
+    <div class="scroll-container" ref="scrollContainer"></div>
 
     <!-- Carousel scene — mounts on top of canvas, card starts at EXACT canvas position -->
     <div class="carousel-scene" v-show="showCarousel" ref="carouselScene">
-
-      <!-- Back button -->
-      <button class="back-btn" @click="goBack" v-show="showCarousel">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-          <path d="M19 12H5M5 12L12 19M5 12L12 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
-      </button>
-
-      <!-- Hint -->
-      <p class="hint-text" :style="{ opacity: isZoomed ? 0 : 1 }">Click a card to enter</p>
 
       <!-- Cards track — uses CSS transform to slide siblings in -->
       <div class="cards-track" ref="cardsTrack">
@@ -43,7 +33,6 @@
           :key="card.id"
           class="card-slot"
           :ref="el => { if (el) cardEls[i] = el as HTMLElement }"
-          @click="enterCard(i)"
         >
           <!-- Room behind the hole -->
           <div class="room-layer">
@@ -372,37 +361,6 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
-.back-btn {
-  position: fixed;
-  top: 28px;
-  left: 28px;
-  z-index: 60;
-  pointer-events: all;
-  width: 42px; height: 42px;
-  border-radius: 50%;
-  background: rgba(255,255,255,0.07);
-  border: 1px solid rgba(255,255,255,0.12);
-  color: rgba(255,255,255,0.7);
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: all 0.2s;
-}
-.back-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
-
-.hint-text {
-  position: fixed;
-  bottom: 36px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-family: 'Inter', sans-serif;
-  font-size: 0.72rem;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: rgba(255,255,255,0.35);
-  pointer-events: none;
-  transition: opacity 0.4s;
-}
-
 /* ── Cards track — position set dynamically by JS ─*/
 .cards-track {
   position: fixed;
@@ -415,10 +373,8 @@ onUnmounted(() => {
 .card-slot {
   position: relative;
   flex-shrink: 0;
-  cursor: pointer;
   /* size & position set dynamically */
 }
-.card-slot:hover .card-frame { filter: brightness(1.08); }
 
 /* ── Room image layer ─────────────────────────── */
 .room-layer {
@@ -447,36 +403,6 @@ onUnmounted(() => {
   display: block;
   transition: filter 0.2s;
 }
-
-/* ── Portal overlay ───────────────────────────── */
-.portal-overlay {
-  display: none;
-  position: fixed;
-  overflow: hidden;
-  z-index: 10000;
-}
-.portal-room-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-  pointer-events: none;
-}
-.portal-close {
-  position: fixed;
-  top: 28px; right: 28px;
-  z-index: 10001;
-  width: 42px; height: 42px;
-  border-radius: 50%;
-  background: rgba(0,0,0,0.5);
-  border: 1px solid rgba(255,255,255,0.2);
-  color: #fff;
-  font-size: 0.9rem;
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: all 0.2s;
-}
-.portal-close:hover { background: rgba(255,255,255,0.15); }
 
 /* ── Transitions ──────────────────────────────── */
 .fade-enter-active, .fade-leave-active { transition: opacity 0.8s ease; }
