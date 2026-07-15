@@ -276,7 +276,6 @@ function exitCard() {
   if (cardsTrack.value) {
     gsap.to(cardsTrack.value, {
       x: 0, y: 0,
-      rotationX: 0, rotationY: 0,
       duration: 0.8,
       ease: "power3.out"
     })
@@ -303,26 +302,23 @@ function exitCard() {
   })
 }
 
-// ── 3D Parallax POV ───────────────────────────────────────────────────────
+// ── Parallax POV (Camera Pan) ─────────────────────────────────────────────
 function handleMouseMove(e: MouseEvent) {
   if (!isZoomed.value || !cardsTrack.value) return
   
   const nx = (e.clientX / window.innerWidth) - 0.5
   const ny = (e.clientY / window.innerHeight) - 0.5
   
-  // Subtle 3D rotation and pan
-  const rotateX = ny * -8
-  const rotateY = nx * 12
-  const moveX = nx * -40
-  const moveY = ny * -40
+  // Natural camera pan (translate only, no fake 3D rotation)
+  // Max scale is 1.15, meaning we have about 15% extra space.
+  // 15% of a 1920 screen is ~288px, so we can safely pan +/- 120px.
+  const moveX = nx * -180
+  const moveY = ny * -100
 
   gsap.to(cardsTrack.value, {
     x: moveX,
     y: moveY,
-    rotationX: rotateX,
-    rotationY: rotateY,
-    transformPerspective: 1000,
-    duration: 0.8,
+    duration: 1.2,
     ease: "power2.out"
   })
 }
