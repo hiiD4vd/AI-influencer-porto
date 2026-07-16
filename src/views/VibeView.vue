@@ -27,7 +27,7 @@
     <div class="carousel-scene" v-show="showCarousel" ref="carouselScene">
       
       <!-- Independent room layer that can scale beautifully without being constrained by the grey card -->
-      <div class="room-layer" :class="{ 'is-zoomed': isZoomed }">
+      <div v-show="false" class="room-layer" :class="{ 'is-zoomed': isZoomed }">
         <div class="parallax-container" ref="parallaxContainer">
           <img :src="CARDS[activeCardIndex].room" class="room-img" draggable="false" />
           
@@ -64,17 +64,17 @@
           :ref="el => { if (el) cardEls[i] = el as HTMLElement }"
         >
           <!-- Card frame with transparent hole on top -->
-          <img src="/images/idcard polos.png" class="card-frame" draggable="false" />
+          <img :src="card.frame" class="card-frame" draggable="false" />
           
           <!-- Enter button -->
-          <button class="enter-btn" @click.stop="enterCard" :class="{ 'is-zoomed': isZoomed }">
+          <button v-show="false" class="enter-btn" @click.stop="enterCard" :class="{ 'is-zoomed': isZoomed }">
             ENTER
           </button>
         </div>
       </div>
       
       <!-- Exit button (appears when zoomed) -->
-      <button class="exit-btn" @click.stop="exitCard" :class="{ 'is-visible': isZoomed }">
+      <button v-show="false" class="exit-btn" @click.stop="exitCard" :class="{ 'is-visible': isZoomed }">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
           <path d="M19 12H5M5 12L12 19M5 12L12 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
         </svg>
@@ -95,9 +95,13 @@ gsap.registerPlugin(ScrollTrigger)
 
 // ── Card data ─────────────────────────────────────────────────────────────
 const CARDS = [
-  { id: 'doctor1', label: 'THE DOCTOR', category: 'Healthcare', room: '/images/ruangan dokter.png' },
-  { id: 'doctor2', label: 'THE DOCTOR 2', category: 'Healthcare', room: '/images/ruangan dokter.png' },
-  { id: 'doctor3', label: 'THE DOCTOR 3', category: 'Healthcare', room: '/images/ruangan dokter.png' }
+  {
+    id: 'athlete',
+    label: 'THE ATHLETE',
+    category: 'Fitness & Performance',
+    frame: '/images/idcard-athlete.png',
+    room: '/images/idcard-athlete.png'
+  }
 ]
 
 const HOTSPOTS = [
@@ -108,7 +112,7 @@ const HOTSPOTS = [
 ]
 
 // ── Frame sequence config ─────────────────────────────────────────────────
-const TOTAL_FRAMES = 186
+const TOTAL_FRAMES = 259
 const SCROLL_PX_PER_FRAME = 12
 const FRAME_PATH = (i: number) => `/frames/hero/frame_${String(i).padStart(4, '0')}.jpg`
 
@@ -455,16 +459,11 @@ function setupScroll() {
     let videoProgress = Math.max(0, Math.min(1, scroll / videoScrollHeight))
     targetFrame = Math.floor(videoProgress * (TOTAL_FRAMES - 1))
     
-    if (targetFrame >= TOTAL_FRAMES - 1) {
-      if (!showCarousel.value) {
-        showCarousel.value = true
-        renderCardZoom(0)
-      }
-    } else {
-      if (showCarousel.value) {
-        showCarousel.value = false
-        if (canvasEl.value) canvasEl.value.style.opacity = '1'
-      }
+    // The story now stays entirely scroll-driven. The former card carousel
+    // must never replace the final canvas frame.
+    if (showCarousel.value) {
+      showCarousel.value = false
+      if (canvasEl.value) canvasEl.value.style.opacity = '1'
     }
   })
 
