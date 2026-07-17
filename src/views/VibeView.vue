@@ -23,6 +23,27 @@
     <!-- Scroll container -->
     <div class="scroll-container" ref="scrollContainer"></div>
 
+    <section
+      class="welcome-scene"
+      :class="{ 'is-active': showWelcome }"
+      :aria-hidden="!showWelcome"
+    >
+      <div ref="welcomePov" class="welcome-pov">
+        <video
+          ref="welcomeVideo"
+          class="welcome-video"
+          src="/videos/video welcome gym.mp4"
+          preload="auto"
+          loop
+          playsinline
+        ></video>
+      </div>
+
+      <div class="welcome-subtitle" aria-live="polite">
+        {{ typedSubtitle }}
+      </div>
+    </section>
+
     <!-- Carousel scene — mounts on top of canvas, card starts at EXACT canvas position -->
     <div class="carousel-scene" v-show="showCarousel" ref="carouselScene">
       
@@ -140,6 +161,14 @@ const parallaxContainer = ref<HTMLElement | null>(null)
 const cardEls        = ref<HTMLElement[]>([])
 const isLoading      = ref(true)
 const loadProgress   = ref(0)
+const welcomeVideo   = ref<HTMLVideoElement | null>(null)
+const welcomePov     = ref<HTMLElement | null>(null)
+const showWelcome    = ref(false)
+const typedSubtitle  = ref('')
+
+const WELCOME_SUBTITLE = 'Selamat datang di ruang latihan saya. Saya adalah AI influencer yang dapat hadir dalam berbagai peran, dan hari ini saya berperan sebagai atlet.'
+const WELCOME_SUBTITLE_START = 0.35
+const WELCOME_SUBTITLE_END_PADDING = 0.45
 
 // ── Idle Animation State ──────────────────────────────────────────────────
 let idleTimeout: any = null
@@ -165,6 +194,23 @@ const activeCardIndex = ref(0)
 const sliderProxy = { index: 0 }
 let currentZoomP     = 0
 let rafId            = 0
+let subtitleRafId    = 0
+let welcomeAudioUnlocked = false
+let welcomeStarting = false
+
+function handleWelcomePovMove(event: PointerEvent) {
+  if (!showWelcome.value || !welcomePov.value || event.pointerType === 'touch') return
+
+  const nx = event.clientX / window.innerWidth - 0.5
+  const ny = event.clientY / window.innerHeight - 0.5
+  gsap.to(welcomePov.value, {
+    x: nx * -window.innerWidth * 0.055,
+    y: ny * -window.innerHeight * 0.04,
+    duration: 1.25,
+    ease: 'power3.out',
+    overwrite: 'auto'
+  })
+}
 
 function nextCard() {
   if (activeCardIndex.value < CARDS.length - 1) {
@@ -241,6 +287,12 @@ function tick() {
   } else if (currentFrame < TOTAL_FRAMES - 1) {
     currentFrame += (targetFrame - currentFrame) * 0.12
     drawFrame(Math.round(currentFrame))
+  }
+
+  if (targetFrame >= TOTAL_FRAMES - 1 && currentFrame >= TOTAL_FRAMES - 1.1) {
+    void startWelcomeScene()
+  } else if (targetFrame < TOTAL_FRAMES - 5) {
+    stopWelcomeScene()
   }
 }
 
@@ -414,6 +466,88 @@ function handleMouseMove(e: MouseEvent) {
 }
 
 // ── Preload ───────────────────────────────────────────────────────────────
+async function primeWelcomeAudio() {
+  const video = welcomeVideo.value
+  if (!video || welcomeAudioUnlocked) return
+
+  video.muted = false
+  video.volume = 0.001
+
+  try {
+    await video.play()
+    welcomeAudioUnlocked = true
+
+    if (!showWelcome.value) {
+      video.pause()
+      video.currentTime = 0
+    }
+  } catch {
+    video.muted = true
+  } finally {
+    video.volume = 1
+  }
+}
+
+async function startWelcomeScene() {
+  if (showWelcome.value || welcomeStarting) return
+  welcomeStarting = true
+
+  const video = welcomeVideo.value
+  typedSubtitle.value = ''
+  if (!video) {
+    welcomeStarting = false
+    return
+  }
+
+  video.currentTime = 0
+  video.muted = !welcomeAudioUnlocked
+
+  try {
+    await video.play()
+  } catch {
+    video.muted = true
+    await video.play().catch(() => undefined)
+  }
+
+  // Cut directly from the final sequence frame to the first decoded video
+  // frame. There is intentionally no fade or decorative transition.
+  showWelcome.value = true
+  if (canvasEl.value) canvasEl.value.style.visibility = 'hidden'
+  welcomeStarting = false
+}
+
+function stopWelcomeScene() {
+  welcomeStarting = false
+  if (!showWelcome.value) return
+
+  showWelcome.value = false
+  typedSubtitle.value = ''
+
+  const video = welcomeVideo.value
+  if (video) {
+    video.pause()
+    video.currentTime = 0
+  }
+
+  if (welcomePov.value) {
+    gsap.set(welcomePov.value, { x: 0, y: 0 })
+  }
+
+  if (canvasEl.value) canvasEl.value.style.visibility = 'visible'
+}
+
+function updateWelcomeSubtitle() {
+  subtitleRafId = requestAnimationFrame(updateWelcomeSubtitle)
+  const video = welcomeVideo.value
+  if (!showWelcome.value || !video) return
+
+  const duration = Number.isFinite(video.duration) ? video.duration : 8.04
+  const end = Math.max(WELCOME_SUBTITLE_START + 0.5, duration - WELCOME_SUBTITLE_END_PADDING)
+  const progress = Math.max(0, Math.min(1, (video.currentTime - WELCOME_SUBTITLE_START) / (end - WELCOME_SUBTITLE_START)))
+  const characterCount = Math.floor(progress * WELCOME_SUBTITLE.length)
+  typedSubtitle.value = WELCOME_SUBTITLE.slice(0, characterCount)
+}
+
 function preloadFrames(): Promise<void> {
   return new Promise(resolve => {
     let loaded = 0
@@ -476,6 +610,9 @@ onMounted(async () => {
   resizeCanvas()
   ctx = canvasEl.value!.getContext('2d')
   window.addEventListener('resize', resizeCanvas)
+  window.addEventListener('pointerdown', primeWelcomeAudio, { once: true })
+  window.addEventListener('pointermove', handleWelcomePovMove, { passive: true })
+  updateWelcomeSubtitle()
   await preloadFrames()
   isLoading.value = false
   drawFrame(0)
@@ -485,11 +622,16 @@ onMounted(async () => {
 
 onUnmounted(() => {
   cancelAnimationFrame(rafId)
+  cancelAnimationFrame(subtitleRafId)
   lenis?.destroy()
   if (idleTimeout) clearTimeout(idleTimeout)
   if (idleTween) idleTween.kill()
   window.removeEventListener('resize', resizeCanvas)
   window.removeEventListener('mousemove', handleMouseMove)
+  window.removeEventListener('pointerdown', primeWelcomeAudio)
+  window.removeEventListener('pointermove', handleWelcomePovMove)
+  welcomeVideo.value?.pause()
+  if (welcomePov.value) gsap.killTweensOf(welcomePov.value)
 })
 </script>
 
@@ -514,6 +656,75 @@ onUnmounted(() => {
   position: relative;
   z-index: 2;
   width: 100%;
+}
+
+.welcome-scene {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  overflow: hidden;
+  background: #000;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.welcome-scene.is-active {
+  visibility: visible;
+}
+
+.welcome-pov {
+  position: absolute;
+  inset: -5%;
+  will-change: transform;
+  pointer-events: none;
+}
+
+.welcome-video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.welcome-subtitle {
+  position: absolute;
+  left: 50%;
+  bottom: max(38px, calc(env(safe-area-inset-bottom) + 18px));
+  z-index: 6;
+  width: min(900px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  color: #fff;
+  font-size: clamp(0.9rem, 1.7vw, 1.2rem);
+  font-weight: 500;
+  line-height: 1.45;
+  text-align: center;
+  text-wrap: balance;
+  text-shadow: 0 2px 5px #000, 0 0 12px rgba(0, 0, 0, 0.9);
+}
+
+@media (hover: none), (pointer: coarse) {
+  .welcome-scene.is-active .welcome-pov {
+    animation: welcomeMobileLook 10s ease-in-out infinite alternate;
+  }
+
+  .welcome-subtitle {
+    bottom: max(24px, calc(env(safe-area-inset-bottom) + 12px));
+    width: calc(100vw - 28px);
+    font-size: 0.88rem;
+  }
+}
+
+@keyframes welcomeMobileLook {
+  0% { transform: translate3d(1.5%, 0.4%, 0); }
+  50% { transform: translate3d(-1.5%, -0.5%, 0); }
+  100% { transform: translate3d(0.7%, 0.6%, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-scene.is-active .welcome-pov {
+    animation: none;
+  }
 }
 
 .loading-overlay {
