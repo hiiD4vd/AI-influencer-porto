@@ -98,7 +98,7 @@ export function createForegroundTexture(
 
   ctx.font = `600 22px ${FONT_BASE}`
   ctx.fillStyle = 'rgba(255,255,255,1)'
-  if ('letterSpacing' in ctx) ;(ctx as any).letterSpacing = '1px'
+  if ('letterSpacing' in ctx) (ctx as any).letterSpacing = '1px'
 
   ctx.textAlign = 'left';  ctx.textBaseline = 'middle'
   ctx.fillText(card.title.toUpperCase(), PAD + 8, MARGIN_TOP / 2)
