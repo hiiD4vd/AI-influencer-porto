@@ -63,4 +63,17 @@ html, body, #app { width: 100%; height: 100%; overflow: hidden; background: #080
   color: #fff;
   background: rgba(255, 255, 255, 0.1);
 }
+
+@media (max-width: 700px) {
+  .shared-nav {
+    top: max(14px, env(safe-area-inset-top));
+    gap: 3px;
+    padding: 5px;
+  }
+  .nav-link {
+    padding: 8px clamp(10px, 3.2vw, 16px);
+    font-size: 0.62rem;
+    letter-spacing: 0.09em;
+  }
+}
 </style>
