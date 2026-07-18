@@ -2,11 +2,10 @@ import { createApp } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import './style.css'
 import App from './App.vue'
-
-const HomeView = () => import('./views/HomeView.vue')
-const ShowcaseView = () => import('./views/ShowcaseView.vue')
-const VibeView = () => import('./views/VibeView.vue')
-const CabinTestView = () => import('./views/CabinTestView.vue')
+import HomeView from './views/HomeView.vue'
+import ShowcaseView from './views/ShowcaseView.vue'
+import VibeView from './views/VibeView.vue'
+import CabinTestView from './views/CabinTestView.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),

@@ -63,9 +63,7 @@ const props = withDefaults(defineProps<{
 })
 
 const { embedded } = props
-const cabinImagePath = window.matchMedia('(max-width: 700px)').matches
-  ? '/images/cabin-windows-mobile-v2.webp'
-  : '/images/cabin-windows-desktop-v2.webp'
+const cabinImagePath = '/images/cabin-windows.png'
 
 const emit = defineEmits<{
   ready: []
@@ -384,8 +382,8 @@ async function initialiseScene() {
 
   const [loadedCabin, loadedCloudOne, loadedCloudTwo] = await Promise.all([
     loadImage(cabinImagePath),
-    loadImage('/images/cloud-1.webp'),
-    loadImage('/images/cloud-2.webp')
+    loadImage('/images/awan (1).png'),
+    loadImage('/images/awan (2).png')
   ])
   if (destroyed) return
 

@@ -1,9 +1,5 @@
 <template>
-  <div
-    class="vibe-view"
-    :class="{ 'is-cabin-scroll-locked': cabinScrollLocked }"
-    ref="viewRoot"
-  >
+  <div class="vibe-view" ref="viewRoot">
     <!-- Navigation -->
     <nav class="shared-nav">
       <RouterLink to="/" class="nav-link" :class="{ active: $route.name === 'home' }">Home</RouterLink>
@@ -40,8 +36,9 @@
           class="welcome-video"
           src="/videos/video welcome gym.mp4"
           preload="auto"
-          :poster="FRAME_PATH(TOTAL_FRAMES)"
+          poster="/frames/hero/frame_0259.jpg"
           loop
+          muted
           playsinline
           webkit-playsinline
         ></video>
@@ -160,13 +157,7 @@ const HOTSPOTS = [
 // ── Frame sequence config ─────────────────────────────────────────────────
 const TOTAL_FRAMES = 259
 const SCROLL_PX_PER_FRAME = 12
-const sequenceFolder = window.matchMedia('(max-width: 700px)').matches
-  ? 'hero-mobile'
-  : 'hero-desktop'
-const FRAME_PATH = (i: number) => `/frames/${sequenceFolder}/frame_${String(i).padStart(4, '0')}.webp`
-const CABIN_IMAGE_PATH = window.matchMedia('(max-width: 700px)').matches
-  ? '/images/cabin-windows-mobile-v2.webp'
-  : '/images/cabin-windows-desktop-v2.webp'
+const FRAME_PATH = (i: number) => `/frames/hero/frame_${String(i).padStart(4, '0')}.jpg`
 
 const LAST_FRAME_PNG = { w: 1920, h: 1080 }
 const CARD_IN_PNG = {
@@ -202,7 +193,6 @@ const cabinTransitionActive = ref(false)
 const showCabinScene = ref(false)
 const embeddedCabinScene = ref<HTMLElement | null>(null)
 const cabinScrollUnlocked = ref(false)
-const cabinScrollLocked = ref(false)
 const fishermanScrollUnlocked = ref(false)
 const preparedCabinChime = shallowRef<HTMLAudioElement | null>(null)
 const preparedCabinAnnouncement = shallowRef<HTMLAudioElement | null>(null)
@@ -263,6 +253,7 @@ let fishermanScrollDistance = 0
 let fishermanTransitionProgress = 0
 let previousWelcomeVideoTime = 0
 let gymPlaybackSession = 0
+let gymUnlockTimer: ReturnType<typeof setTimeout> | null = null
 let cabinAudioPrimed = false
 let cabinAudioPriming = false
 
@@ -369,76 +360,11 @@ function updateSlider() {
 }
 
 // ── State ─────────────────────────────────────────────────────────────────
-const images: Array<HTMLImageElement | undefined> = []
-const loadingFrames = new Map<number, Promise<void>>()
-const FRAME_CACHE_BEHIND = 8
-const FRAME_CACHE_AHEAD = 14
-const INITIAL_FRAME_COUNT = 12
+const images: HTMLImageElement[] = []
 let ctx: CanvasRenderingContext2D | null = null
 let currentFrame = 0
 let targetFrame  = 0
 let lenis: Lenis | null = null
-let lastFrameWindowCenter = -1
-
-function loadFrame(index: number): Promise<void> {
-  const frameIndex = Math.max(0, Math.min(TOTAL_FRAMES - 1, index))
-  if (images[frameIndex]?.complete) return Promise.resolve()
-  const pending = loadingFrames.get(frameIndex)
-  if (pending) return pending
-
-  const promise = new Promise<void>(resolve => {
-    const image = new Image()
-    image.decoding = 'async'
-    image.onload = () => {
-      images[frameIndex] = image
-      loadingFrames.delete(frameIndex)
-      resolve()
-    }
-    image.onerror = () => {
-      loadingFrames.delete(frameIndex)
-      resolve()
-    }
-    image.src = FRAME_PATH(frameIndex + 1)
-  })
-  loadingFrames.set(frameIndex, promise)
-  return promise
-}
-
-function findNearestLoadedFrame(index: number) {
-  if (images[index]?.complete) return images[index]
-  for (let distance = 1; distance < TOTAL_FRAMES; distance++) {
-    const before = images[index - distance]
-    if (before?.complete) return before
-    const after = images[index + distance]
-    if (after?.complete) return after
-  }
-  return undefined
-}
-
-function trimFrameCache(center: number) {
-  const minimum = Math.max(0, center - FRAME_CACHE_BEHIND)
-  const maximum = Math.min(TOTAL_FRAMES - 1, center + FRAME_CACHE_AHEAD)
-  for (let index = 0; index < images.length; index++) {
-    if (index < minimum || index > maximum) images[index] = undefined
-  }
-}
-
-function ensureFrameWindow(center: number) {
-  const frameCenter = Math.max(0, Math.min(TOTAL_FRAMES - 1, Math.round(center)))
-  if (frameCenter === lastFrameWindowCenter) return
-  lastFrameWindowCenter = frameCenter
-  trimFrameCache(frameCenter)
-
-  const order = [frameCenter]
-  for (let distance = 1; distance <= FRAME_CACHE_AHEAD; distance++) {
-    if (frameCenter + distance < TOTAL_FRAMES) order.push(frameCenter + distance)
-    if (distance <= FRAME_CACHE_BEHIND && frameCenter - distance >= 0) order.push(frameCenter - distance)
-  }
-  void Promise.all(order.map(loadFrame)).then(() => {
-    trimFrameCache(lastFrameWindowCenter)
-    drawFrame(Math.round(currentFrame))
-  })
-}
 
 // ── Calculate where the card appears on-screen from the canvas cover-fit ─
 function getCardScreenRect() {
@@ -461,9 +387,7 @@ function getCardScreenRect() {
 
 // ── Draw frame to canvas ──────────────────────────────────────────────────
 function drawFrame(index: number) {
-  const frameIndex = Math.max(0, Math.min(index, TOTAL_FRAMES - 1))
-  const img = findNearestLoadedFrame(frameIndex)
-  if (!images[frameIndex]) void loadFrame(frameIndex).then(() => drawFrame(frameIndex))
+  const img = images[Math.min(index, TOTAL_FRAMES - 1)]
   if (!img || !ctx || !canvasEl.value) return
   const cvs = canvasEl.value
   const cW = cvs.width, cH = cvs.height
@@ -710,11 +634,26 @@ async function primeCabinAudio() {
 
 function stopGymMedia() {
   gymPlaybackSession += 1
+  if (gymUnlockTimer) {
+    clearTimeout(gymUnlockTimer)
+    gymUnlockTimer = null
+  }
   const video = welcomeVideo.value
   if (!video) return
   video.pause()
   video.muted = true
   video.volume = 1
+}
+
+function scheduleCabinUnlock(video: HTMLVideoElement) {
+  if (gymUnlockTimer) clearTimeout(gymUnlockTimer)
+  const duration = Number.isFinite(video.duration) && video.duration > 0
+    ? video.duration
+    : 8.2
+  gymUnlockTimer = window.setTimeout(() => {
+    gymUnlockTimer = null
+    if (showWelcome.value && !showCabinScene.value) unlockCabinScroll()
+  }, duration * 1000 + 180)
 }
 
 async function primeWelcomeAudio() {
@@ -735,11 +674,26 @@ async function primeWelcomeAudio() {
 
   try {
     await video.play()
-    if (
-      playbackSession !== gymPlaybackSession ||
-      cabinTransitionProgress > 0.0001 ||
-      showCabinScene.value
-    ) {
+    // The Gym can become visible while this gesture-initiated play promise is
+    // still resolving. In that case this is not a stale playback to stop: it
+    // is the exact same video element the visitor is now watching.
+    if (playbackSession !== gymPlaybackSession) {
+      if (
+        showWelcome.value &&
+        !showCabinScene.value &&
+        cabinTransitionProgress <= 0.0001
+      ) {
+        welcomeAudioUnlocked = true
+        video.volume = 1
+        video.muted = false
+        window.removeEventListener('pointerdown', primeWelcomeAudio)
+        window.removeEventListener('touchstart', primeWelcomeAudio)
+        window.removeEventListener('wheel', primeWelcomeAudio)
+        window.removeEventListener('keydown', primeWelcomeAudio)
+      }
+      return
+    }
+    if (cabinTransitionProgress > 0.0001 || showCabinScene.value) {
       video.pause()
       video.muted = true
       return
@@ -790,8 +744,12 @@ async function startWelcomeScene() {
 
   video.currentTime = 0
   previousWelcomeVideoTime = 0
-  video.muted = false
+  // Muted playback is always permitted, so the visual must never get stuck.
+  // If the earlier scroll/touch gesture authorised this same element, restore
+  // its built-in audio immediately after playback is running.
+  video.muted = true
   video.volume = 1
+  scheduleCabinUnlock(video)
 
   try {
     await video.play()
@@ -801,11 +759,14 @@ async function startWelcomeScene() {
       welcomeStarting = false
       return
     }
-    welcomeAudioUnlocked = true
-    window.removeEventListener('pointerdown', primeWelcomeAudio)
-    window.removeEventListener('touchstart', primeWelcomeAudio)
-    window.removeEventListener('wheel', primeWelcomeAudio)
-    window.removeEventListener('keydown', primeWelcomeAudio)
+    if (welcomeAudioUnlocked) {
+      video.muted = false
+      window.removeEventListener('pointerdown', primeWelcomeAudio)
+      window.removeEventListener('touchstart', primeWelcomeAudio)
+      window.removeEventListener('wheel', primeWelcomeAudio)
+      window.removeEventListener('keydown', primeWelcomeAudio)
+    }
+    scheduleCabinUnlock(video)
   } catch {
     if (playbackSession !== gymPlaybackSession) {
       welcomeStarting = false
@@ -813,6 +774,7 @@ async function startWelcomeScene() {
     }
     video.muted = true
     await video.play().catch(() => undefined)
+    if (!video.paused) scheduleCabinUnlock(video)
     if (playbackSession !== gymPlaybackSession || showCabinScene.value) {
       video.pause()
       video.muted = true
@@ -864,15 +826,19 @@ function updateWelcomeSubtitle() {
 }
 
 function preloadFrames(): Promise<void> {
-  let loaded = 0
-  return Promise.all(
-    Array.from({ length: INITIAL_FRAME_COUNT }, (_, index) =>
-      loadFrame(index).finally(() => {
+  return new Promise(resolve => {
+    let loaded = 0
+    for (let i = 1; i <= TOTAL_FRAMES; i++) {
+      const img = new Image()
+      img.src = FRAME_PATH(i)
+      img.onload = img.onerror = () => {
         loaded++
-        loadProgress.value = (loaded / INITIAL_FRAME_COUNT) * 100
-      })
-    )
-  ).then(() => undefined)
+        loadProgress.value = (loaded / TOTAL_FRAMES) * 100
+        if (loaded === TOTAL_FRAMES) resolve()
+      }
+      images[i - 1] = img
+    }
+  })
 }
 
 // ── Resize ────────────────────────────────────────────────────────────────
@@ -896,33 +862,16 @@ const smoothstep = (start: number, end: number, value: number) => {
   return progress * progress * (3 - 2 * progress)
 }
 
-let cabinAssetPromise: Promise<void> | null = null
-let fishermanAssetPromise: Promise<void> | null = null
-
 function preloadCabinTransitionAsset() {
-  if (cabinTransitionImage) return Promise.resolve()
-  if (cabinAssetPromise) return cabinAssetPromise
-  cabinAssetPromise = new Promise<void>(resolve => {
-    const image = new Image()
-    image.decoding = 'async'
-    image.onload = () => { cabinTransitionImage = image; resolve() }
-    image.onerror = () => resolve()
-    image.src = CABIN_IMAGE_PATH
-  })
-  return cabinAssetPromise
-}
+  const image = new Image()
+  image.decoding = 'async'
+  image.onload = () => { cabinTransitionImage = image }
+  image.src = '/images/cabin-windows.png'
 
-function preloadFishermanAsset() {
-  if (fishermanImage) return Promise.resolve()
-  if (fishermanAssetPromise) return fishermanAssetPromise
-  fishermanAssetPromise = new Promise<void>(resolve => {
-    const image = new Image()
-    image.decoding = 'async'
-    image.onload = () => { fishermanImage = image; resolve() }
-    image.onerror = () => resolve()
-    image.src = '/images/fisherman.webp'
-  })
-  return fishermanAssetPromise
+  const fisherman = new Image()
+  fisherman.decoding = 'async'
+  fisherman.onload = () => { fishermanImage = fisherman }
+  fisherman.src = '/images/fisherman.png'
 }
 
 function captureWelcomeFrame() {
@@ -1182,11 +1131,8 @@ function updateStoryScrollHeight() {
 
 function unlockCabinScroll() {
   if (cabinScrollUnlocked.value) return
-  void preloadCabinTransitionAsset().then(() => {
-    if (cabinScrollUnlocked.value || !cabinTransitionImage) return
-    cabinScrollUnlocked.value = true
-    updateStoryScrollHeight()
-  })
+  cabinScrollUnlocked.value = true
+  updateStoryScrollHeight()
 }
 
 function handleWelcomeVideoTimeUpdate() {
@@ -1203,7 +1149,6 @@ async function resumeGymFromBeginning() {
   const video = welcomeVideo.value
   const playbackSession = ++gymPlaybackSession
   showWelcome.value = true
-  cabinScrollLocked.value = false
   showCabinScene.value = false
   cabinTransitionActive.value = false
   frozenGymFrame = null
@@ -1215,7 +1160,8 @@ async function resumeGymFromBeginning() {
   }
   if (!video) return
   video.currentTime = 0
-  video.muted = false
+  video.muted = true
+  scheduleCabinUnlock(video)
   try {
     await video.play()
     if (playbackSession !== gymPlaybackSession || cabinTransitionProgress > 0.0001) {
@@ -1223,11 +1169,13 @@ async function resumeGymFromBeginning() {
       video.muted = true
       return
     }
-    welcomeAudioUnlocked = true
+    if (welcomeAudioUnlocked) video.muted = false
+    scheduleCabinUnlock(video)
   } catch {
     if (playbackSession !== gymPlaybackSession) return
     video.muted = true
     await video.play().catch(() => undefined)
+    if (!video.paused) scheduleCabinUnlock(video)
     if (playbackSession !== gymPlaybackSession || cabinTransitionProgress > 0.0001) {
       video.pause()
       video.muted = true
@@ -1268,15 +1216,12 @@ function updateCabinFromScroll(progress: number) {
   if (!showCabinScene.value) {
     showWelcome.value = false
     stopGymMedia()
-    lenis?.stop()
-    cabinScrollLocked.value = true
     showCabinScene.value = true
   }
 }
 
 function handleEmbeddedCabinReady() {
   if (!showCabinScene.value) return
-  void preloadFishermanAsset()
   // The transition remains visible until the Cabin canvas has drawn its first
   // real frame, so clouds and camera motion are already running at handoff.
   requestAnimationFrame(() => {
@@ -1286,13 +1231,10 @@ function handleEmbeddedCabinReady() {
 
 function handleCabinScrollUnlocked() {
   if (!showCabinScene.value) return
-  void preloadFishermanAsset().then(() => {
-    if (!fishermanImage) return
-    fishermanScrollUnlocked.value = true
-    updateStoryScrollHeight()
-    cabinScrollLocked.value = false
-    lenis?.start()
-  })
+  fishermanScrollUnlocked.value = true
+  updateStoryScrollHeight()
+  cabinScrollLocked.value = false
+  lenis?.start()
 }
 
 function updateFishermanFromScroll(progress: number) {
@@ -1341,7 +1283,6 @@ function setupScroll() {
     targetFrame = videoProgress >= 0.995
       ? TOTAL_FRAMES - 1
       : Math.round(videoProgress * (TOTAL_FRAMES - 1))
-    ensureFrameWindow(targetFrame)
 
     const transitionProgress = cabinScrollUnlocked.value
       ? (scroll - heroScrollEnd) / Math.max(1, cabinScrollDistance)
@@ -1369,6 +1310,7 @@ function setupScroll() {
 onMounted(async () => {
   resizeCanvas()
   ctx = canvasEl.value!.getContext('2d')
+  preloadCabinTransitionAsset()
   prepareCabinAudio()
   window.addEventListener('resize', resizeCanvas)
   window.addEventListener('pointerdown', primeWelcomeAudio)
@@ -1418,10 +1360,6 @@ onUnmounted(() => {
   frozenCabinFrame = null
   cabinTransitionImage = null
   fishermanImage = null
-  cabinAssetPromise = null
-  fishermanAssetPromise = null
-  images.length = 0
-  loadingFrames.clear()
   for (const audio of [preparedCabinChime.value, preparedCabinAnnouncement.value]) {
     if (!audio) continue
     audio.pause()
@@ -1439,10 +1377,6 @@ onUnmounted(() => {
   inset: 0;
   overflow: auto;
   background: #000;
-}
-
-.vibe-view.is-cabin-scroll-locked {
-  overflow: hidden;
 }
 
 .hero-canvas {
