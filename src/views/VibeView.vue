@@ -1,11 +1,16 @@
 <template>
-  <div class="vibe-view" ref="viewRoot">
+  <div
+    class="vibe-view"
+    :class="{ 'is-cabin-scroll-locked': cabinScrollLocked }"
+    ref="viewRoot"
+  >
     <!-- Navigation -->
     <nav class="shared-nav">
       <RouterLink to="/" class="nav-link" :class="{ active: $route.name === 'home' }">Home</RouterLink>
       <RouterLink to="/showcase" class="nav-link" :class="{ active: $route.name === 'showcase' }">Showcase</RouterLink>
       <RouterLink to="/vibe" class="nav-link" :class="{ active: $route.name === 'vibe' }">Vibe</RouterLink>
       <RouterLink to="/cabin-test" class="nav-link" :class="{ active: $route.name === 'cabin-test' }">Cabin</RouterLink>
+      <RouterLink to="/transition-test" class="nav-link" :class="{ active: $route.name === 'transition-test' }">FX</RouterLink>
     </nav>
 
     <!-- Canvas — always visible until fully replaced -->
@@ -44,7 +49,10 @@
         ></video>
       </div>
 
-      <div class="welcome-subtitle" aria-live="polite">{{ typedSubtitle }}</div>
+      <div class="welcome-subtitle" aria-live="polite">
+        {{ typedSubtitle }}
+        <span v-if="gymAudioPrompt" class="gym-audio-prompt">{{ gymAudioPrompt }}</span>
+      </div>
     </section>
 
     <!-- Carousel scene — mounts on top of canvas, card starts at EXACT canvas position -->
@@ -64,6 +72,15 @@
         @ready="handleEmbeddedCabinReady"
         @scroll-unlocked="handleCabinScrollUnlocked"
       />
+    </section>
+
+    <section
+      class="profession-marquee-section"
+      :class="{ 'is-active': professionMarqueeProgress > 0.001 }"
+      :style="{ transform: `translate3d(0, ${(1 - professionMarqueeProgress) * 100}%, 0)` }"
+      :aria-hidden="professionMarqueeProgress <= 0.001"
+    >
+      <ProfessionMarquee />
     </section>
 
     <div class="carousel-scene" v-show="showCarousel" ref="carouselScene">
@@ -133,6 +150,7 @@ import Lenis from 'lenis'
 import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import CabinTestView from './CabinTestView.vue'
+import ProfessionMarquee from '../components/ProfessionMarquee.vue'
 
 gsap.registerPlugin(ScrollTrigger)
 
@@ -188,12 +206,15 @@ const welcomeScene   = ref<HTMLElement | null>(null)
 const welcomePov     = ref<HTMLElement | null>(null)
 const showWelcome    = ref(false)
 const typedSubtitle  = ref('')
+const gymAudioPrompt = ref('')
 const cabinTransitionCanvas = ref<HTMLCanvasElement | null>(null)
 const cabinTransitionActive = ref(false)
 const showCabinScene = ref(false)
 const embeddedCabinScene = ref<HTMLElement | null>(null)
 const cabinScrollUnlocked = ref(false)
+const cabinScrollLocked = ref(false)
 const fishermanScrollUnlocked = ref(false)
+const professionMarqueeProgress = ref(0)
 const preparedCabinChime = shallowRef<HTMLAudioElement | null>(null)
 const preparedCabinAnnouncement = shallowRef<HTMLAudioElement | null>(null)
 
@@ -250,12 +271,14 @@ let baseStoryScrollHeight = 0
 let heroScrollEnd = 0
 let cabinScrollDistance = 0
 let fishermanScrollDistance = 0
+let professionMarqueeDistance = 0
 let fishermanTransitionProgress = 0
 let previousWelcomeVideoTime = 0
 let gymPlaybackSession = 0
 let gymUnlockTimer: ReturnType<typeof setTimeout> | null = null
 let cabinAudioPrimed = false
 let cabinAudioPriming = false
+let cabinTransitionAssetPromise: Promise<boolean> | null = null
 
 const clampPov = (value: number) => Math.max(-1, Math.min(1, value))
 
@@ -674,9 +697,6 @@ async function primeWelcomeAudio() {
 
   try {
     await video.play()
-    // The Gym can become visible while this gesture-initiated play promise is
-    // still resolving. In that case this is not a stale playback to stop: it
-    // is the exact same video element the visitor is now watching.
     if (playbackSession !== gymPlaybackSession) {
       if (
         showWelcome.value &&
@@ -684,6 +704,7 @@ async function primeWelcomeAudio() {
         cabinTransitionProgress <= 0.0001
       ) {
         welcomeAudioUnlocked = true
+        gymAudioPrompt.value = ''
         video.volume = 1
         video.muted = false
         window.removeEventListener('pointerdown', primeWelcomeAudio)
@@ -699,14 +720,12 @@ async function primeWelcomeAudio() {
       return
     }
     welcomeAudioUnlocked = true
+    gymAudioPrompt.value = ''
     window.removeEventListener('pointerdown', primeWelcomeAudio)
     window.removeEventListener('touchstart', primeWelcomeAudio)
     window.removeEventListener('wheel', primeWelcomeAudio)
     window.removeEventListener('keydown', primeWelcomeAudio)
 
-    // Keep this exact video element playing almost silently after the genuine
-    // scroll/touch gesture. When the Gym becomes visible it can be rewound and
-    // raised to full volume without asking for another click.
     if (!showWelcome.value) video.volume = 0.001
   } catch {
     if (playbackSession !== gymPlaybackSession) return
@@ -724,8 +743,6 @@ async function startWelcomeScene() {
 
   const video = welcomeVideo.value
   typedSubtitle.value = ''
-  // Start fetching the next physical scene while the Gym video is playing,
-  // so the first transition scroll never waits for the cabin asset.
   void preloadCabinTransitionAsset()
   if (!video) {
     welcomeStarting = false
@@ -744,9 +761,6 @@ async function startWelcomeScene() {
 
   video.currentTime = 0
   previousWelcomeVideoTime = 0
-  // Muted playback is always permitted, so the visual must never get stuck.
-  // If the earlier scroll/touch gesture authorised this same element, restore
-  // its built-in audio immediately after playback is running.
   video.muted = true
   video.volume = 1
   scheduleCabinUnlock(video)
@@ -761,6 +775,7 @@ async function startWelcomeScene() {
     }
     if (welcomeAudioUnlocked) {
       video.muted = false
+      gymAudioPrompt.value = ''
       window.removeEventListener('pointerdown', primeWelcomeAudio)
       window.removeEventListener('touchstart', primeWelcomeAudio)
       window.removeEventListener('wheel', primeWelcomeAudio)
@@ -862,21 +877,33 @@ const smoothstep = (start: number, end: number, value: number) => {
   return progress * progress * (3 - 2 * progress)
 }
 
-function preloadCabinTransitionAsset() {
-  const image = new Image()
-  image.decoding = 'async'
-  image.onload = () => { cabinTransitionImage = image }
-  image.src = '/images/cabin-windows.png'
+function preloadCabinTransitionAsset(): Promise<boolean> {
+  if (cabinTransitionImage) return Promise.resolve(true)
+  if (cabinTransitionAssetPromise) return cabinTransitionAssetPromise
 
-  const fisherman = new Image()
-  fisherman.decoding = 'async'
-  fisherman.onload = () => { fishermanImage = fisherman }
-  fisherman.src = '/images/fisherman.png'
+  cabinTransitionAssetPromise = new Promise<boolean>(resolve => {
+    const image = new Image()
+    image.decoding = 'async'
+    image.onload = () => {
+      cabinTransitionImage = image
+      resolve(true)
+    }
+    image.onerror = () => resolve(false)
+    image.src = '/images/cabin-windows.png'
+  })
+
+  if (!fishermanImage) {
+    const fisherman = new Image()
+    fisherman.decoding = 'async'
+    fisherman.onload = () => { fishermanImage = fisherman }
+    fisherman.src = '/images/fisherman.png'
+  }
+
+  return cabinTransitionAssetPromise
 }
 
 function captureWelcomeFrame() {
   const canvas = cabinTransitionCanvas.value
-  const video = welcomeVideo.value
   if (!canvas) return false
 
   const width = window.innerWidth
@@ -889,26 +916,22 @@ function captureWelcomeFrame() {
   const frameContext = frame.getContext('2d')
   if (!frameContext) return false
 
-  if (video && video.readyState >= 2) {
-    const videoWidth = video.offsetWidth || width
-    const videoHeight = video.offsetHeight || height
-    const x = (width - videoWidth) / 2 + povCurrentX * getPovTravel().x
-    const y = (height - videoHeight) / 2 + povCurrentY * getPovTravel().y
-    frameContext.drawImage(video, x, y, videoWidth, videoHeight)
-  } else {
-    const fallback = images[TOTAL_FRAMES - 1]
-    if (!fallback) return false
-    const scale = Math.max(width / fallback.naturalWidth, height / fallback.naturalHeight)
-    const drawWidth = fallback.naturalWidth * scale
-    const drawHeight = fallback.naturalHeight * scale
-    frameContext.drawImage(
-      fallback,
-      (width - drawWidth) / 2,
-      (height - drawHeight) / 2,
-      drawWidth,
-      drawHeight
-    )
-  }
+  // The morph must always begin from the authored Gym still (the final hero
+  // frame), not from an arbitrary moment or POV offset in the looping video.
+  // This creates the intended clean cut: live video -> original Gym image ->
+  // scroll-driven camera pullback into the airplane cabin.
+  const gymStill = images[TOTAL_FRAMES - 1]
+  if (!gymStill?.complete || !gymStill.naturalWidth) return false
+  const scale = Math.max(width / gymStill.naturalWidth, height / gymStill.naturalHeight)
+  const drawWidth = gymStill.naturalWidth * scale
+  const drawHeight = gymStill.naturalHeight * scale
+  frameContext.drawImage(
+    gymStill,
+    (width - drawWidth) / 2,
+    (height - drawHeight) / 2,
+    drawWidth,
+    drawHeight
+  )
 
   frozenGymFrame = frame
   return true
@@ -1124,15 +1147,19 @@ function updateStoryScrollHeight() {
   if (!scrollContainer.value) return
   const cabinHeight = cabinScrollUnlocked.value ? cabinScrollDistance : 0
   const fishermanHeight = fishermanScrollUnlocked.value ? fishermanScrollDistance : 0
-  const extraHeight = cabinHeight + fishermanHeight
+  const professionHeight = fishermanScrollUnlocked.value ? professionMarqueeDistance : 0
+  const extraHeight = cabinHeight + fishermanHeight + professionHeight
   scrollContainer.value.style.height = `${window.innerHeight + baseStoryScrollHeight + extraHeight}px`
   requestAnimationFrame(() => lenis?.resize())
 }
 
 function unlockCabinScroll() {
   if (cabinScrollUnlocked.value) return
-  cabinScrollUnlocked.value = true
-  updateStoryScrollHeight()
+  void preloadCabinTransitionAsset().then(ready => {
+    if (!ready || cabinScrollUnlocked.value) return
+    cabinScrollUnlocked.value = true
+    updateStoryScrollHeight()
+  })
 }
 
 function handleWelcomeVideoTimeUpdate() {
@@ -1149,6 +1176,7 @@ async function resumeGymFromBeginning() {
   const video = welcomeVideo.value
   const playbackSession = ++gymPlaybackSession
   showWelcome.value = true
+  cabinScrollLocked.value = false
   showCabinScene.value = false
   cabinTransitionActive.value = false
   frozenGymFrame = null
@@ -1216,6 +1244,8 @@ function updateCabinFromScroll(progress: number) {
   if (!showCabinScene.value) {
     showWelcome.value = false
     stopGymMedia()
+    lenis?.stop()
+    cabinScrollLocked.value = true
     showCabinScene.value = true
   }
 }
@@ -1241,16 +1271,22 @@ function updateFishermanFromScroll(progress: number) {
   const previousProgress = fishermanTransitionProgress
   fishermanTransitionProgress = clamp01(progress)
   if (fishermanTransitionProgress <= 0.0001) {
-    // The interactive Cabin remains mounted, so reversing the scroll returns
-    // to it immediately without replaying its completed announcement.
-    cabinTransitionActive.value = false
-    if (previousProgress > 0.0001) frozenCabinFrame = null
+    // Do not hide the Gym -> Cabin morph canvas here. This function is also
+    // called with zero progress throughout that earlier transition.
+    if (previousProgress > 0.0001) {
+      cabinTransitionActive.value = false
+      frozenCabinFrame = null
+    }
     return
   }
 
   if (previousProgress <= 0.0001 && !frozenCabinFrame) captureCabinFrame()
   cabinTransitionActive.value = true
   renderFishermanTransition(fishermanTransitionProgress)
+}
+
+function updateProfessionMarqueeFromScroll(progress: number) {
+  professionMarqueeProgress.value = clamp01(progress)
 }
 
 // ── Setup scroll ──────────────────────────────────────────────────────────
@@ -1261,6 +1297,7 @@ function setupScroll() {
   heroScrollEnd = videoScrollHeight
   cabinScrollDistance = Math.max(2800, window.innerHeight * 3.2)
   fishermanScrollDistance = Math.max(2400, window.innerHeight * 2.8)
+  professionMarqueeDistance = Math.max(900, window.innerHeight * 1.15)
   updateStoryScrollHeight()
 
   lenis?.destroy()
@@ -1293,6 +1330,11 @@ function setupScroll() {
       ? (scroll - heroScrollEnd - cabinScrollDistance) / Math.max(1, fishermanScrollDistance)
       : 0
     updateFishermanFromScroll(fishermanProgress)
+
+    const professionProgress = fishermanScrollUnlocked.value
+      ? (scroll - heroScrollEnd - cabinScrollDistance - fishermanScrollDistance) / Math.max(1, professionMarqueeDistance)
+      : 0
+    updateProfessionMarqueeFromScroll(professionProgress)
     
     // The story now stays entirely scroll-driven. The former card carousel
     // must never replace the final canvas frame.
@@ -1359,6 +1401,7 @@ onUnmounted(() => {
   frozenGymFrame = null
   frozenCabinFrame = null
   cabinTransitionImage = null
+  cabinTransitionAssetPromise = null
   fishermanImage = null
   for (const audio of [preparedCabinChime.value, preparedCabinAnnouncement.value]) {
     if (!audio) continue
@@ -1377,6 +1420,10 @@ onUnmounted(() => {
   inset: 0;
   overflow: auto;
   background: #000;
+}
+
+.vibe-view.is-cabin-scroll-locked {
+  overflow: hidden;
 }
 
 .hero-canvas {
@@ -1403,6 +1450,21 @@ onUnmounted(() => {
   inset: 0;
   z-index: 7;
   overflow: hidden;
+}
+
+.profession-marquee-section {
+  position: fixed;
+  inset: 0;
+  z-index: 12;
+  overflow: hidden;
+  pointer-events: none;
+  visibility: hidden;
+  will-change: transform;
+}
+
+.profession-marquee-section.is-active {
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .scroll-container {
@@ -1467,6 +1529,14 @@ onUnmounted(() => {
   text-wrap: balance;
   white-space: pre-line;
   text-shadow: 0 2px 5px #000, 0 0 12px rgba(0, 0, 0, 0.9);
+}
+
+.gym-audio-prompt {
+  display: block;
+  margin-top: 7px;
+  font-size: 0.72em;
+  letter-spacing: 0.04em;
+  opacity: 0.82;
 }
 
 @media (hover: none), (pointer: coarse) {
