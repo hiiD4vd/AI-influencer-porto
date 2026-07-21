@@ -26,6 +26,7 @@ let camera: THREE.OrthographicCamera | null = null
 let animationFrame = 0
 let lightTexture: THREE.CanvasTexture | null = null
 let darkTexture: THREE.CanvasTexture | null = null
+let scrollHost: HTMLElement | Window = window
 
 const vertexShader = /* glsl */ `
   varying vec2 vUv;
@@ -274,8 +275,12 @@ onMounted(async () => {
     mesh.frustumCulled = false
     scene.add(mesh)
     resize()
+    scrollHost = stage.value?.closest('.fx-page') instanceof HTMLElement
+      ? stage.value.closest('.fx-page') as HTMLElement
+      : window
     window.addEventListener('resize', resize)
     window.addEventListener('scroll', updateFromScroll, { passive: true })
+    if (scrollHost !== window) scrollHost.addEventListener('scroll', updateFromScroll, { passive: true })
     document.getElementById('app')?.addEventListener('scroll', updateFromScroll, { passive: true })
     loading.value = false
     ready.value = true
@@ -291,6 +296,7 @@ onUnmounted(() => {
   cancelAnimationFrame(animationFrame)
   window.removeEventListener('resize', resize)
   window.removeEventListener('scroll', updateFromScroll)
+  if (scrollHost !== window) scrollHost.removeEventListener('scroll', updateFromScroll)
   document.getElementById('app')?.removeEventListener('scroll', updateFromScroll)
   lightTexture?.dispose()
   darkTexture?.dispose()

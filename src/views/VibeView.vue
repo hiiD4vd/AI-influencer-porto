@@ -1,7 +1,10 @@
 <template>
   <div
     class="vibe-view"
-    :class="{ 'is-cabin-scroll-locked': cabinScrollLocked }"
+    :class="{
+      'is-cabin-scroll-locked': cabinScrollLocked,
+      'is-fluid-hero-active': fluidHeroActive,
+    }"
     ref="viewRoot"
   >
     <!-- Navigation -->
@@ -27,7 +30,21 @@
     </Transition>
 
     <!-- Scroll container -->
-    <div class="scroll-container" ref="scrollContainer"></div>
+    <div class="scroll-container" ref="scrollContainer">
+      <div class="intro-interactive-frame">
+        <FluidVideoHero shared-frame />
+        <section class="hero-profession-strip" aria-label="Explore Kevin AI professions">
+          <ProfessionMarquee :fluid-enabled="false" />
+        </section>
+        <div class="hero-fluid-spacer" aria-hidden="true"></div>
+      </div>
+      <div ref="introTransitionMarker" class="intro-transition-marker" aria-hidden="true"></div>
+    </div>
+
+    <VibeIntroTransition
+      :progress="introTransitionProgress"
+      :active="introTransitionActive"
+    />
 
     <section
       ref="welcomeScene"
@@ -72,15 +89,6 @@
         @ready="handleEmbeddedCabinReady"
         @scroll-unlocked="handleCabinScrollUnlocked"
       />
-    </section>
-
-    <section
-      class="profession-marquee-section"
-      :class="{ 'is-active': professionMarqueeProgress > 0.001 }"
-      :style="{ transform: `translate3d(0, ${(1 - professionMarqueeProgress) * 100}%, 0)` }"
-      :aria-hidden="professionMarqueeProgress <= 0.001"
-    >
-      <ProfessionMarquee />
     </section>
 
     <div class="carousel-scene" v-show="showCarousel" ref="carouselScene">
@@ -150,7 +158,9 @@ import Lenis from 'lenis'
 import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import CabinTestView from './CabinTestView.vue'
+import FluidVideoHero from '../components/FluidVideoHero.vue'
 import ProfessionMarquee from '../components/ProfessionMarquee.vue'
+import VibeIntroTransition from '../components/VibeIntroTransition.vue'
 
 gsap.registerPlugin(ScrollTrigger)
 
@@ -214,7 +224,10 @@ const embeddedCabinScene = ref<HTMLElement | null>(null)
 const cabinScrollUnlocked = ref(false)
 const cabinScrollLocked = ref(false)
 const fishermanScrollUnlocked = ref(false)
-const professionMarqueeProgress = ref(0)
+const fluidHeroActive = ref(true)
+const introTransitionMarker = ref<HTMLElement | null>(null)
+const introTransitionProgress = ref(0)
+const introTransitionActive = ref(false)
 const preparedCabinChime = shallowRef<HTMLAudioElement | null>(null)
 const preparedCabinAnnouncement = shallowRef<HTMLAudioElement | null>(null)
 
@@ -268,10 +281,12 @@ let frozenGymFrame: HTMLCanvasElement | null = null
 let frozenCabinFrame: HTMLCanvasElement | null = null
 let cabinHandoffTimeout: ReturnType<typeof setTimeout> | null = null
 let baseStoryScrollHeight = 0
+let storyScrollStart = 0
+let introTransitionStart = 0
+let introTransitionDistance = 0
 let heroScrollEnd = 0
 let cabinScrollDistance = 0
 let fishermanScrollDistance = 0
-let professionMarqueeDistance = 0
 let fishermanTransitionProgress = 0
 let previousWelcomeVideoTime = 0
 let gymPlaybackSession = 0
@@ -1147,9 +1162,8 @@ function updateStoryScrollHeight() {
   if (!scrollContainer.value) return
   const cabinHeight = cabinScrollUnlocked.value ? cabinScrollDistance : 0
   const fishermanHeight = fishermanScrollUnlocked.value ? fishermanScrollDistance : 0
-  const professionHeight = fishermanScrollUnlocked.value ? professionMarqueeDistance : 0
-  const extraHeight = cabinHeight + fishermanHeight + professionHeight
-  scrollContainer.value.style.height = `${window.innerHeight + baseStoryScrollHeight + extraHeight}px`
+  const extraHeight = cabinHeight + fishermanHeight
+  scrollContainer.value.style.height = `${window.innerHeight + storyScrollStart + baseStoryScrollHeight + extraHeight}px`
   requestAnimationFrame(() => lenis?.resize())
 }
 
@@ -1285,19 +1299,22 @@ function updateFishermanFromScroll(progress: number) {
   renderFishermanTransition(fishermanTransitionProgress)
 }
 
-function updateProfessionMarqueeFromScroll(progress: number) {
-  professionMarqueeProgress.value = clamp01(progress)
-}
-
 // ── Setup scroll ──────────────────────────────────────────────────────────
 function setupScroll() {
   if (!scrollContainer.value || !viewRoot.value) return
   const videoScrollHeight = TOTAL_FRAMES * SCROLL_PX_PER_FRAME
   baseStoryScrollHeight = videoScrollHeight
-  heroScrollEnd = videoScrollHeight
+  // Match the shader boundary to the real bottom edge of the intro frame.
+  // Across exactly one viewport of scrolling, both edges travel from the
+  // bottom to the top together, so the profession strip never teleports.
+  const introMarkerTop = introTransitionMarker.value?.offsetTop
+    ?? Math.round(window.innerHeight * 2.42)
+  introTransitionStart = Math.max(0, introMarkerTop - window.innerHeight)
+  introTransitionDistance = Math.max(1, window.innerHeight)
+  storyScrollStart = introTransitionStart + introTransitionDistance
+  heroScrollEnd = storyScrollStart + videoScrollHeight
   cabinScrollDistance = Math.max(2800, window.innerHeight * 3.2)
   fishermanScrollDistance = Math.max(2400, window.innerHeight * 2.8)
-  professionMarqueeDistance = Math.max(900, window.innerHeight * 1.15)
   updateStoryScrollHeight()
 
   lenis?.destroy()
@@ -1314,9 +1331,20 @@ function setupScroll() {
     // Before the Cabin range exists, Lenis' live limit is the only reliable
     // endpoint on mobile because Safari's address bar changes viewport height.
     if (!cabinScrollUnlocked.value) {
-      heroScrollEnd = Math.max(1, limit || videoScrollHeight)
+      heroScrollEnd = Math.max(storyScrollStart + 1, limit || storyScrollStart + videoScrollHeight)
     }
-    const videoProgress = Math.max(0, Math.min(1, scroll / Math.max(1, heroScrollEnd)))
+    fluidHeroActive.value = scroll < storyScrollStart
+
+    // Read the marker's actual on-screen position after Lenis has applied its
+    // smoothed scroll. Deriving this from `scroll` alone can drift from the DOM
+    // edge and expose the sequence as a thin, straight horizontal strip.
+    const markerViewportTop = introTransitionMarker.value?.getBoundingClientRect().top
+      ?? (window.innerHeight - (scroll - introTransitionStart))
+    introTransitionProgress.value = clamp01(
+      1 - markerViewportTop / Math.max(1, window.innerHeight),
+    )
+    introTransitionActive.value = markerViewportTop <= window.innerHeight && markerViewportTop > 0
+    const videoProgress = Math.max(0, Math.min(1, (scroll - storyScrollStart) / Math.max(1, heroScrollEnd - storyScrollStart)))
     targetFrame = videoProgress >= 0.995
       ? TOTAL_FRAMES - 1
       : Math.round(videoProgress * (TOTAL_FRAMES - 1))
@@ -1331,11 +1359,6 @@ function setupScroll() {
       : 0
     updateFishermanFromScroll(fishermanProgress)
 
-    const professionProgress = fishermanScrollUnlocked.value
-      ? (scroll - heroScrollEnd - cabinScrollDistance - fishermanScrollDistance) / Math.max(1, professionMarqueeDistance)
-      : 0
-    updateProfessionMarqueeFromScroll(professionProgress)
-    
     // The story now stays entirely scroll-driven. The former card carousel
     // must never replace the final canvas frame.
     if (showCarousel.value) {
@@ -1418,12 +1441,39 @@ onUnmounted(() => {
 .vibe-view {
   position: fixed;
   inset: 0;
+  width: 100vw;
   overflow: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   background: #000;
+}
+
+.vibe-view::-webkit-scrollbar {
+  display: none;
 }
 
 .vibe-view.is-cabin-scroll-locked {
   overflow: hidden;
+}
+
+.vibe-view.is-fluid-hero-active .shared-nav {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(46, 46, 46, 0.14);
+  box-shadow: 0 8px 28px rgba(46, 46, 46, 0.08);
+}
+
+.vibe-view.is-fluid-hero-active .nav-link {
+  color: rgba(46, 46, 46, 0.58);
+}
+
+.vibe-view.is-fluid-hero-active .nav-link:hover:not(.active) {
+  color: #2e2e2e;
+  background: rgba(46, 46, 46, 0.08);
+}
+
+.vibe-view.is-fluid-hero-active .nav-link.active {
+  color: #fff;
+  background: #2e2e2e;
 }
 
 .hero-canvas {
@@ -1452,25 +1502,73 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.profession-marquee-section {
-  position: fixed;
-  inset: 0;
-  z-index: 12;
-  overflow: hidden;
-  pointer-events: none;
-  visibility: hidden;
-  will-change: transform;
-}
-
-.profession-marquee-section.is-active {
-  visibility: visible;
-  pointer-events: auto;
-}
-
 .scroll-container {
   position: relative;
   z-index: 2;
+  width: 100vw;
+  max-width: none;
+}
+
+.intro-interactive-frame {
+  position: relative;
   width: 100%;
+  isolation: isolate;
+  overflow: visible;
+  background: transparent;
+}
+
+.intro-interactive-frame::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: #fff;
+  pointer-events: none;
+}
+
+.hero-profession-strip {
+  position: relative;
+  z-index: 3;
+  width: 100vw;
+  height: clamp(320px, 48vh, 520px);
+  overflow: hidden;
+  background: transparent;
+}
+
+.hero-profession-strip :deep(.profession-marquee) {
+  --item-height: min(42vh, 450px);
+  --item-gap: clamp(12px, 1.8vw, 30px);
+  background: transparent;
+}
+
+.hero-fluid-spacer {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  height: clamp(160px, 26vh, 300px);
+  background: transparent;
+  pointer-events: none;
+}
+
+.intro-transition-marker {
+  width: 100%;
+  height: 1px;
+  pointer-events: none;
+}
+
+@media (max-width: 700px) {
+  .hero-profession-strip {
+    height: clamp(250px, 40vh, 370px);
+  }
+
+  .hero-profession-strip :deep(.profession-marquee) {
+    --item-height: min(34vh, 315px);
+    --item-gap: 14px;
+  }
+
+  .hero-fluid-spacer {
+    height: clamp(120px, 22svh, 210px);
+  }
 }
 
 .welcome-scene {

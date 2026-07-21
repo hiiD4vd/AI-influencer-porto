@@ -1,5 +1,6 @@
 <template>
   <div class="profession-marquee" aria-label="Kevin AI professions">
+    <ProfessionFluidBackground v-if="fluidEnabled" />
     <div class="profession-track">
       <div
         v-for="group in 2"
@@ -8,8 +9,8 @@
         :aria-hidden="group === 2 ? 'true' : undefined"
       >
         <div
-          v-for="profession in professions"
-          :key="`${group}-${profession.name}`"
+          v-for="(profession, index) in loopingProfessions"
+          :key="`${group}-${profession.name}-${index}`"
           class="profession-item"
           :tabindex="group === 1 ? 0 : -1"
           :aria-label="group === 1 ? profession.label : undefined"
@@ -46,6 +47,9 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import ProfessionFluidBackground from './ProfessionFluidBackground.vue'
+
+withDefaults(defineProps<{ fluidEnabled?: boolean }>(), { fluidEnabled: true })
 
 const professions = [
   {
@@ -69,7 +73,81 @@ const professions = [
     rest: '/images/fisherman 2.png',
     hover: '/images/fisherman 1.png',
   },
+  {
+    name: 'astronaut',
+    label: 'Kevin in astronaut mode',
+    cursorLabel: 'KEVIN.AI / ASTRONAUT',
+    rest: '/images/Astronaut 2.png',
+    hover: '/images/Astronaut 1.png',
+  },
+  {
+    name: 'deep-sea-diver',
+    label: 'Kevin in deep-sea diver mode',
+    cursorLabel: 'KEVIN.AI / DEEP-SEA DIVER',
+    rest: '/images/Classic Deep-Sea Diver 2.png',
+    hover: '/images/Classic Deep-Sea Diver 1.png',
+  },
+  {
+    name: 'doctor',
+    label: 'Kevin in doctor mode',
+    cursorLabel: 'KEVIN.AI / DOCTOR',
+    rest: '/images/Dokter 2.png',
+    hover: '/images/Dokter 1.png',
+  },
+  {
+    name: 'firefighter',
+    label: 'Kevin in firefighter mode',
+    cursorLabel: 'KEVIN.AI / FIREFIGHTER',
+    rest: '/images/Firefighter 2.png',
+    hover: '/images/Firefighter 1.png',
+  },
+  {
+    name: 'hazmat-specialist',
+    label: 'Kevin in hazmat specialist mode',
+    cursorLabel: 'KEVIN.AI / HAZMAT SPECIALIST',
+    rest: '/images/Hazmat Specialist 2.png',
+    hover: '/images/Hazmat Specialist 1.png',
+  },
+  {
+    name: 'mountaineer',
+    label: 'Kevin in mountaineer mode',
+    cursorLabel: 'KEVIN.AI / MOUNTAINEER',
+    rest: '/images/Mountaineer 2.png',
+    hover: '/images/Mountaineer 1.png',
+  },
+  {
+    name: 'airline-pilot',
+    label: 'Kevin in airline pilot mode',
+    cursorLabel: 'KEVIN.AI / AIRLINE PILOT',
+    rest: '/images/Pilot maskapai 2.png',
+    hover: '/images/Pilot maskapai 1.png',
+  },
+  {
+    name: 'punisher',
+    label: 'Kevin in punisher mode',
+    cursorLabel: 'KEVIN.AI / PUNISHER',
+    rest: '/images/Punisher 2.png',
+    hover: '/images/Punisher 1.png',
+  },
+  {
+    name: 'racing-driver',
+    label: 'Kevin in racing driver mode',
+    cursorLabel: 'KEVIN.AI / RACING DRIVER',
+    rest: '/images/Racing Driver 2.png',
+    hover: '/images/Racing Driver 1.png',
+  },
+  {
+    name: 'special-forces-soldier',
+    label: 'Kevin in special forces mode',
+    cursorLabel: 'KEVIN.AI / SPECIAL FORCES',
+    rest: '/images/Special-Forces Soldier 2.png',
+    hover: '/images/Special-Forces Soldier 1.png',
+  },
 ]
+
+// Thirteen professions already make each half wider than the largest supported
+// viewport. The second identical group keeps the -50% loop mathematically seamless.
+const loopingProfessions = professions
 
 const cursorLabel = ref('')
 const cursorLabelX = ref(0)
@@ -104,20 +182,24 @@ function hideCursorLabel() {
   --item-height: min(68vh, 720px);
   --item-width: calc(var(--item-height) * 0.565);
   --item-gap: clamp(24px, 3.2vw, 64px);
+  position: relative;
+  isolation: isolate;
   width: 100%;
   height: 100%;
   overflow: hidden;
   display: flex;
   align-items: center;
-  background: #f7f7f7;
+  background: #fff;
   user-select: none;
 }
 
 .profession-track {
+  position: relative;
+  z-index: 1;
   display: flex;
   width: max-content;
   will-change: transform;
-  animation: profession-marquee-left 22s linear infinite;
+  animation: profession-marquee-left 52s linear infinite;
 }
 
 .profession-group {
@@ -200,7 +282,7 @@ function hideCursorLabel() {
   }
 
   .profession-track {
-    animation-duration: 17s;
+    animation-duration: 42s;
   }
 }
 

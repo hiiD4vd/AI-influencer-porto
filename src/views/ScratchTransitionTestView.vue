@@ -1,194 +1,327 @@
 <template>
-  <div class="transition-page">
-    <main ref="scrollStage" class="shader-test">
-      <div class="shader-viewport">
-        <img class="shader-fallback" src="/frames/hero/frame_0259.jpg" alt="" aria-hidden="true" />
-        <canvas
-          ref="canvas"
-          class="shader-canvas"
-          :class="{ 'is-ready': shaderReady }"
-          aria-hidden="true"
-        ></canvas>
+  <div ref="scrollRoot" class="fx-page">
+    <FluidVideoHero />
 
-        <div class="shader-label" :style="{ opacity: labelOpacity }" aria-hidden="true">
-          {{ activeLabel }}
+    <section ref="stage" class="fx-stage">
+      <div class="fx-viewport">
+        <div ref="canvas2" class="fx-canvas fx-canvas--back" aria-hidden="true"></div>
+        <div ref="canvas1" class="fx-canvas fx-canvas--front" aria-hidden="true"></div>
+
+        <div class="text-overlay" aria-live="polite">
+          <h1 ref="dynamicText" class="dynamic-text">YOU</h1>
         </div>
 
-        <div v-if="loading" class="shader-status">Preparing WebGL transition</div>
-        <div v-else-if="loadError" class="shader-status">WebGL transition unavailable</div>
+        <div v-if="loading" class="fx-status">Preparing original WebGL transition</div>
+        <div v-else-if="loadError" class="fx-status">WebGL transition unavailable</div>
       </div>
-    </main>
-    <InkSectionTransition />
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import * as THREE from 'three'
-import InkSectionTransition from '../components/InkSectionTransition.vue'
+import { gsap } from 'gsap'
+import FluidVideoHero from '../components/FluidVideoHero.vue'
 
-const canvas = ref<HTMLCanvasElement | null>(null)
-const scrollStage = ref<HTMLElement | null>(null)
+const stage = ref<HTMLElement | null>(null)
+const scrollRoot = ref<HTMLElement | null>(null)
+const canvas1 = ref<HTMLElement | null>(null)
+const canvas2 = ref<HTMLElement | null>(null)
+const dynamicText = ref<HTMLElement | null>(null)
 const loading = ref(true)
 const loadError = ref(false)
-const shaderReady = ref(false)
-const activeLabel = ref('YOU')
-const labelOpacity = ref(0)
 
-let renderer: THREE.WebGLRenderer | null = null
-let material: THREE.ShaderMaterial | null = null
+let renderer1: THREE.WebGLRenderer | null = null
+let renderer2: THREE.WebGLRenderer | null = null
+let scene1: THREE.Scene | null = null
+let scene2: THREE.Scene | null = null
+let camera1: THREE.OrthographicCamera | null = null
+let camera2: THREE.OrthographicCamera | null = null
 let geometry: THREE.PlaneGeometry | null = null
-let scene: THREE.Scene | null = null
-let camera: THREE.OrthographicCamera | null = null
-let mesh: THREE.Mesh | null = null
-let textureA: THREE.Texture | null = null
-let textureB: THREE.Texture | null = null
+let material1: THREE.ShaderMaterial | null = null
+let material2: THREE.ShaderMaterial | null = null
+let texture1: THREE.Texture | null = null
+let texture2: THREE.Texture | null = null
+let textTimeline: gsap.core.Timeline | null = null
 let animationFrame = 0
-let scrollProgress = 0
-let pageStyles: Array<[HTMLElement, string, string]> = []
-let appScroller: HTMLElement | null = null
+let scrollSyncFrame = 0
+let textState = 'start'
 
-const vertexShader = /* glsl */ `
+const coverVertexShader = /* glsl */ `
   varying vec2 vUv;
-
   void main() {
     vUv = uv;
-    gl_Position = vec4(position, 1.0);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `
 
-const fragmentShader = /* glsl */ `
-  precision highp float;
-
-  uniform sampler2D uTextureA;
-  uniform sampler2D uTextureB;
+const coverFragmentShader = /* glsl */ `
+  uniform sampler2D uTexture;
   uniform vec2 uResolution;
-  uniform vec2 uTextureASize;
-  uniform vec2 uTextureBSize;
-  uniform float uRadius;
-  uniform float uSketch;
-  uniform float uEdge;
+  uniform vec2 uImageResolution;
+  uniform float uDissolve;
+  uniform vec2 uCenter;
   uniform float uTime;
-
+  uniform float uIdleMotion;
+  uniform float uGrayscale;
+  uniform float uEdgeIntensity;
+  uniform float uEdgeBrightness;
   varying vec2 vUv;
 
-  float hash21(vec2 p) {
-    p = fract(p * vec2(123.34, 456.21));
-    p += dot(p, p + 45.32);
-    return fract(p.x * p.y);
+  mat3 sobelX = mat3(
+    -1.0, 0.0, 1.0,
+    -2.0, 0.0, 2.0,
+    -1.0, 0.0, 1.0
+  );
+
+  mat3 sobelY = mat3(
+    -1.0, -2.0, -1.0,
+     0.0,  0.0,  0.0,
+     1.0,  2.0,  1.0
+  );
+
+  float getLuminance(vec3 color) {
+    return dot(color, vec3(0.299, 0.587, 0.114));
   }
 
-  float valueNoise(vec2 p) {
+  float sobel(sampler2D tex, vec2 uv, vec2 texelSize) {
+    float gx = 0.0;
+    float gy = 0.0;
+
+    for (int i = -1; i <= 1; i++) {
+      for (int j = -1; j <= 1; j++) {
+        vec2 offset = vec2(float(i), float(j)) * texelSize;
+        float lum = getLuminance(texture2D(tex, uv + offset).rgb);
+        gx += lum * sobelX[i + 1][j + 1];
+        gy += lum * sobelY[i + 1][j + 1];
+      }
+    }
+
+    return sqrt(gx * gx + gy * gy);
+  }
+
+  float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+  }
+
+  float noise(vec2 p) {
     vec2 i = floor(p);
     vec2 f = fract(p);
     f = f * f * (3.0 - 2.0 * f);
-    return mix(
-      mix(hash21(i), hash21(i + vec2(1.0, 0.0)), f.x),
-      mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0)), f.x),
-      f.y
-    );
+
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
   }
 
   float fbm(vec2 p) {
     float value = 0.0;
     float amplitude = 0.5;
+    float frequency = 1.0;
+
     for (int i = 0; i < 5; i++) {
-      value += valueNoise(p) * amplitude;
-      p = p * 2.03 + vec2(11.7, 7.9);
+      value += amplitude * noise(p * frequency);
       amplitude *= 0.5;
+      frequency *= 2.0;
     }
+
     return value;
   }
 
-  vec2 coverUv(vec2 uv, vec2 textureSize) {
-    float viewportAspect = uResolution.x / uResolution.y;
-    float textureAspect = textureSize.x / textureSize.y;
-    vec2 scale = vec2(1.0);
-    if (textureAspect > viewportAspect) {
-      scale.x = viewportAspect / textureAspect;
-    } else {
-      scale.y = textureAspect / viewportAspect;
-    }
-    return (uv - 0.5) * scale + 0.5;
-  }
+  void main() {
+    vec2 ratio = vec2(
+      min((uResolution.x / uResolution.y) / (uImageResolution.x / uImageResolution.y), 1.0),
+      min((uResolution.y / uResolution.x) / (uImageResolution.y / uImageResolution.x), 1.0)
+    );
 
-  float colorLuma(vec3 color) {
+    vec2 uv = vec2(
+      vUv.x * ratio.x + (1.0 - ratio.x) * 0.5,
+      vUv.y * ratio.y + (1.0 - ratio.y) * 0.5
+    );
+
+    vec4 texColor = texture2D(uTexture, uv);
+
+    float gray = getLuminance(texColor.rgb);
+    vec3 grayscaleColor = vec3(gray);
+    texColor.rgb = mix(texColor.rgb, grayscaleColor, uGrayscale);
+
+    // Keep the original pixel/noise material, but anchor its geometry to the
+    // boundary between sections instead of a radial point in the centre.
+    // A tighter cell size produces the dense, fine-grained dissolve seen in
+    // the reference while preserving the deliberately pixelated silhouette.
+    float noiseScale = 3.0;
+    vec2 pixelatedUv = floor(vUv * uResolution / noiseScale) * noiseScale / uResolution;
+    // Keep the boundary alive even when scroll progress is stationary. The
+    // broad wave moves slowly, while quantised columns make individual pixel
+    // clusters rise and fall without turning the edge into a smooth sine wave.
+    float motionTime = uTime * uIdleMotion;
+    float blockNoise = fbm(vec2(pixelatedUv.x * 8.0, 3.4 + motionTime * 0.075)) * 0.13;
+    float mediumNoise = fbm(vec2(pixelatedUv.x * 21.0 + 7.0 - motionTime * 0.10, 1.8 + motionTime * 0.045)) * 0.055;
+    float fineNoise = noise(vec2(pixelatedUv.x * 57.0, 8.2 + motionTime * 0.16)) * 0.018;
+    float gentleWave = (
+      sin(pixelatedUv.x * 12.0 + motionTime * 1.05) * 0.0065
+      + sin(pixelatedUv.x * 27.0 - motionTime * 0.68) * 0.0035
+    ) * uIdleMotion;
+    float pixelColumn = sin(
+      floor(pixelatedUv.x * 72.0) * 0.41 + motionTime * 1.30
+    ) * 0.0025 * uIdleMotion;
+    float sectionFront = mix(-0.18, 1.18, uDissolve)
+      + (blockNoise - 0.065)
+      + (mediumNoise - 0.0275)
+      + (fineNoise - 0.009)
+      + gentleWave
+      + pixelColumn;
+
+    vec2 texelSize = 1.0 / uResolution;
+    float edge = sobel(uTexture, uv, texelSize);
+
+    edge = pow(edge, 0.7) * 2.0;
+    edge = clamp(edge, 0.0, 1.0);
+
+    // The outgoing section remains above the front. The incoming section is
+    // exposed below it, so reversing scroll restores the first section.
+    float dissolveMask = smoothstep(sectionFront - 0.018, sectionFront + 0.018, vUv.y);
+
+    vec3 edgeColor = vec3(1.0, 1.0, 1.0);
+
+    vec3 baseColor = mix(texColor.rgb, vec3(0.0), uGrayscale);
+    vec3 finalColor = baseColor;
+
+    float edgeGlowIntensity = uEdgeIntensity * 2.0;
+    float edgeGlow = edge * edgeGlowIntensity * (1.0 + uGrayscale * 3.0);
+    finalColor += edgeColor * edgeGlow * uEdgeBrightness;
+
+    float edgeZoneWidth = 0.072 * (1.0 - uDissolve) + 0.022;
+    float edgeDistance = abs(vUv.y - sectionFront);
+    float edgeZone = 1.0 - smoothstep(edgeZoneWidth * 0.2, edgeZoneWidth, edgeDistance);
+    vec2 sparkleCell = floor(vUv * uResolution / 2.0);
+    float sparkleSeed = hash(sparkleCell);
+    float sparkle = sparkleSeed * edgeZone;
+
+    float edgeBrightness = (1.0 - uDissolve) * uEdgeBrightness * (1.0 + uGrayscale * 2.0);
+    finalColor += vec3(sparkle * 2.35 * edgeBrightness);
+
+    // A luminous contour sits exactly on the irregular section boundary.
+    // Multiple bands create a crisp white core and a restrained soft halo;
+    // per-column variation keeps it granular instead of looking vector-smooth.
+    float contourCell = hash(vec2(floor(gl_FragCoord.x / 3.0), 19.0));
+    float contourPulse = 0.92 + 0.08 * sin(
+      uTime * 1.35 + floor(gl_FragCoord.x / 3.0) * 0.17
+    ) * uIdleMotion;
+    float contourCoreWidth = mix(0.0035, 0.0065, contourCell);
+    float contourCore = 1.0 - smoothstep(contourCoreWidth, contourCoreWidth + 0.0045, edgeDistance);
+    float contourHalo = 1.0 - smoothstep(0.004, 0.020, edgeDistance);
+    // Layer two offset micro-pixel fields so the illuminated contour is dense
+    // without making the band itself any wider.
+    float offsetSparkleSeed = hash(floor((vUv * uResolution + vec2(1.0, 3.0)) / 3.0) + 31.7);
+    float denseSparkleSeed = max(sparkleSeed, offsetSparkleSeed * 0.94);
+    float contourDust = smoothstep(0.20, 0.58, denseSparkleSeed) * (
+      1.0 - smoothstep(0.012, 0.040, edgeDistance)
+    );
+    float contourLight = (
+      contourCore * 1.85
+      + contourHalo * 0.46
+      + contourDust * 0.48
+    ) * contourPulse;
+    float contourVisibility = 0.78 + 0.22 * uEdgeBrightness;
+    finalColor += vec3(contourLight * contourVisibility);
+
+    float alpha = dissolveMask * texColor.a;
+
+    gl_FragColor = vec4(finalColor, alpha);
+  }
+`
+
+const coverFragmentShaderReverse = /* glsl */ `
+  uniform sampler2D uTexture;
+  uniform vec2 uResolution;
+  uniform vec2 uImageResolution;
+  uniform float uDissolve;
+  uniform vec2 uCenter;
+  uniform float uTime;
+  uniform float uBrightness;
+  uniform float uEdgeIntensity;
+  uniform float uDarkness;
+  uniform float uGrayscale;
+  varying vec2 vUv;
+
+  mat3 sobelX = mat3(
+    -1.0, 0.0, 1.0,
+    -2.0, 0.0, 2.0,
+    -1.0, 0.0, 1.0
+  );
+
+  mat3 sobelY = mat3(
+    -1.0, -2.0, -1.0,
+     0.0,  0.0,  0.0,
+     1.0,  2.0,  1.0
+  );
+
+  float getLuminance(vec3 color) {
     return dot(color, vec3(0.299, 0.587, 0.114));
   }
 
-  vec3 charcoalVersion(vec2 uv, vec3 source) {
-    vec2 texel = 1.65 / uTextureBSize;
-    float l = colorLuma(texture2D(uTextureB, uv - vec2(texel.x, 0.0)).rgb);
-    float r = colorLuma(texture2D(uTextureB, uv + vec2(texel.x, 0.0)).rgb);
-    float t = colorLuma(texture2D(uTextureB, uv - vec2(0.0, texel.y)).rgb);
-    float b = colorLuma(texture2D(uTextureB, uv + vec2(0.0, texel.y)).rgb);
-    float edge = length(vec2(r - l, b - t));
-    float broadEdge = smoothstep(0.025, 0.19, edge);
-    float sourceLum = colorLuma(source);
-    float paper = fbm(vUv * vec2(6.0, 9.0));
-    vec3 charcoal = vec3(0.018 + sourceLum * 0.055 + paper * 0.015);
-    charcoal += broadEdge * vec3(0.76, 0.79, 0.76);
-    return charcoal;
+  float sobel(sampler2D tex, vec2 uv, vec2 texelSize) {
+    float gx = 0.0;
+    float gy = 0.0;
+
+    for (int i = -1; i <= 1; i++) {
+      for (int j = -1; j <= 1; j++) {
+        vec2 offset = vec2(float(i), float(j)) * texelSize;
+        float lum = getLuminance(texture2D(tex, uv + offset).rgb);
+        gx += lum * sobelX[i + 1][j + 1];
+        gy += lum * sobelY[i + 1][j + 1];
+      }
+    }
+
+    return sqrt(gx * gx + gy * gy);
   }
 
   void main() {
-    float aspect = uResolution.x / uResolution.y;
-    vec2 centered = vUv - 0.5;
-    centered.x *= aspect;
-    float distanceFromCenter = length(centered);
-    float angle = atan(centered.y, centered.x);
+    vec2 ratio = vec2(
+      min((uResolution.x / uResolution.y) / (uImageResolution.x / uImageResolution.y), 1.0),
+      min((uResolution.y / uResolution.x) / (uImageResolution.y / uImageResolution.x), 1.0)
+    );
 
-    float angularNoise = fbm(vec2(angle * 3.15 + 8.0, distanceFromCenter * 12.0 + uTime * 0.07));
-    float paperNoise = fbm(vUv * vec2(13.0, 19.0) + vec2(uTime * 0.025, -uTime * 0.018));
-    float hairNoise = valueNoise(vec2(angle * 26.0, floor(distanceFromCenter * 85.0) - uTime * 0.8));
-    float edgeDisplacement = (angularNoise - 0.5) * 0.102 + (paperNoise - 0.5) * 0.048;
-    float signedDistance = distanceFromCenter - (uRadius + edgeDisplacement);
+    vec2 uv = vec2(
+      vUv.x * ratio.x + (1.0 - ratio.x) * 0.5,
+      vUv.y * ratio.y + (1.0 - ratio.y) * 0.5
+    );
 
-    vec2 direction = distanceFromCenter > 0.0001 ? centered / distanceFromCenter : vec2(0.0);
-    vec2 warp = vec2(direction.x / aspect, direction.y) * (paperNoise - 0.5) * 0.018 * uEdge;
-    vec2 uvA = coverUv(vUv + warp, uTextureASize);
-    vec2 uvB = coverUv(vUv - warp * 0.32, uTextureBSize);
-    vec3 imageA = texture2D(uTextureA, uvA).rgb;
-    vec3 imageB = texture2D(uTextureB, uvB).rgb;
+    vec4 texColor = texture2D(uTexture, uv);
 
-    vec3 sketchB = charcoalVersion(uvB, imageB);
-    vec3 backdrop = mix(imageB, sketchB, uSketch);
+    float gray = getLuminance(texColor.rgb);
+    vec3 grayscaleColor = vec3(gray);
+    texColor.rgb = mix(texColor.rgb, grayscaleColor, uGrayscale);
 
-    float portal = 1.0 - smoothstep(-0.018, 0.019, signedDistance);
-    vec3 color = mix(backdrop, imageA, portal);
+    vec2 texelSize = 1.0 / uResolution;
+    float edge = sobel(uTexture, uv, texelSize);
 
-    float dustBand = 1.0 - smoothstep(0.014, 0.086, abs(signedDistance));
-    float chalkBand = 1.0 - smoothstep(0.005, 0.034, abs(signedDistance));
-    vec2 particleCell = floor(gl_FragCoord.xy / 1.65);
-    float particleSeed = hash21(particleCell + floor(uTime * 11.0));
-    float brokenInk = smoothstep(0.38, 0.78, paperNoise * 0.72 + hairNoise * 0.52);
-    float particles = dustBand * step(0.61, particleSeed) * brokenInk;
-    float chalk = chalkBand * (0.35 + 0.65 * brokenInk);
-    float whiteEdge = clamp((particles * 0.78 + chalk * 0.58) * uEdge, 0.0, 0.9);
-    color = mix(color, vec3(0.96, 0.955, 0.89), whiteEdge);
+    edge = pow(edge, 0.7) * 2.0;
+    edge = clamp(edge, 0.0, 1.0);
 
-    float lineScratch = smoothstep(0.79, 0.98, valueNoise(vec2(vUv.y * 170.0, vUv.x * 3.0 + uTime * 0.2)));
-    color += dustBand * lineScratch * uEdge * vec3(0.12);
+    vec3 edgeColor = vec3(1.0, 1.0, 1.0);
 
-    float grain = hash21(gl_FragCoord.xy + floor(uTime * 17.0)) - 0.5;
-    color += grain * (0.012 + dustBand * 0.026 * uEdge);
-    gl_FragColor = vec4(color, 1.0);
+    vec3 darkBase = vec3(0.0);
+    vec3 baseColor = mix(texColor.rgb, darkBase, uDarkness);
+
+    float edgeGlow = edge * uEdgeIntensity * 2.0;
+    baseColor += edgeColor * edgeGlow;
+
+    vec3 finalColor = clamp(baseColor, 0.0, 1.0);
+
+    gl_FragColor = vec4(finalColor, texColor.a);
   }
 `
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value))
-const smoothstep = (value: number) => {
-  const t = clamp01(value)
-  return t * t * (3 - 2 * t)
-}
-const smootherstep = (value: number) => {
-  const t = clamp01(value)
-  return t * t * t * (t * (t * 6 - 15) + 10)
-}
 
 function loadTexture(loader: THREE.TextureLoader, path: string) {
   return loader.loadAsync(path).then(texture => {
-    texture.colorSpace = THREE.SRGBColorSpace
     texture.minFilter = THREE.LinearFilter
     texture.magFilter = THREE.LinearFilter
     texture.generateMipmaps = false
@@ -196,258 +329,275 @@ function loadTexture(loader: THREE.TextureLoader, path: string) {
   })
 }
 
-function resizeRenderer() {
-  if (!renderer || !material) return
-  const width = window.innerWidth
-  const height = window.innerHeight
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.65))
-  renderer.setSize(width, height, false)
-  material.uniforms.uResolution.value.set(width, height)
-}
+function updateTransition(progress: number) {
+  const amount = clamp01(progress)
 
-function updateTimeline(progress: number) {
-  if (!material) return
-
-  const viewportAspect = window.innerWidth / Math.max(window.innerHeight, 1)
-  const fullRadius = Math.sqrt(viewportAspect * viewportAspect * 0.25 + 0.25) + 0.18
-  let radius = fullRadius
-  let sketch = 1
-  let edge = 0
-  let label = 'YOU'
-  let opacity = 0
-
-  if (progress < 0.235) {
-    const local = smootherstep(progress / 0.235)
-    radius = fullRadius * (1 - local)
-    sketch = local
-    edge = Math.sin(local * Math.PI)
-  } else if (progress < 0.46) {
-    radius = -0.08
-    sketch = 0
-    label = 'YOU'
-    opacity = smoothstep((progress - 0.255) / 0.055) * (1 - smoothstep((progress - 0.405) / 0.045))
-  } else if (progress < 0.79) {
-    const local = smootherstep((progress - 0.46) / 0.33)
-    radius = -0.08 + (fullRadius + 0.08) * local
-    sketch = local
-    edge = Math.sin(local * Math.PI)
-  } else {
-    radius = fullRadius
-    sketch = 1
-    label = 'BEAUTIFULL'
-    opacity = smoothstep((progress - 0.81) / 0.055) * (1 - smoothstep((progress - 0.965) / 0.03))
+  if (material1) {
+    material1.uniforms.uDissolve.value = amount
+    const grayscaleProgress = Math.min(1, amount / 0.4)
+    material1.uniforms.uGrayscale.value = grayscaleProgress
+    material1.uniforms.uEdgeIntensity.value = amount * 0.5
+    material1.uniforms.uEdgeBrightness.value = 1 - amount
   }
 
-  material.uniforms.uRadius.value = radius
-  material.uniforms.uSketch.value = sketch
-  material.uniforms.uEdge.value = edge
-  activeLabel.value = label
-  labelOpacity.value = opacity
+  if (material2) {
+    const acceleratedProgress = Math.min(1, amount * 1.1)
+    material2.uniforms.uEdgeIntensity.value = 0.6 * (1 - acceleratedProgress)
+    material2.uniforms.uDarkness.value = 1 - acceleratedProgress
+    material2.uniforms.uGrayscale.value = 1 - acceleratedProgress
+  }
+
+  if (dynamicText.value) {
+    if (amount < 0.5 && textState !== 'start') {
+      dynamicText.value.textContent = 'YOU'
+      textState = 'start'
+    } else if (amount >= 0.5 && textState !== 'end') {
+      dynamicText.value.textContent = 'BEAUTIFULL'
+      textState = 'end'
+    }
+  }
+
+  textTimeline?.progress(amount)
 }
 
-function updateFromScroll() {
-  if (!scrollStage.value) return
-  const rect = scrollStage.value.getBoundingClientRect()
-  const scrollableDistance = Math.max(scrollStage.value.offsetHeight - window.innerHeight, 1)
-  scrollProgress = clamp01(-rect.top / scrollableDistance)
-  updateTimeline(scrollProgress)
+function resize() {
+  const width = window.innerWidth
+  const height = window.innerHeight
+  renderer1?.setSize(width, height)
+  renderer2?.setSize(width, height)
+  material1?.uniforms.uResolution.value.set(width, height)
+  material2?.uniforms.uResolution.value.set(width, height)
+  syncTransitionFromScroll()
+}
+
+function syncTransitionFromScroll() {
+  if (!stage.value || !scrollRoot.value) return
+  const distance = Math.max(stage.value.offsetHeight - scrollRoot.value.clientHeight, 1)
+  updateTransition((scrollRoot.value.scrollTop - stage.value.offsetTop) / distance)
+}
+
+function handlePageScroll() {
+  if (scrollSyncFrame) return
+  scrollSyncFrame = requestAnimationFrame(() => {
+    scrollSyncFrame = 0
+    syncTransitionFromScroll()
+  })
 }
 
 function render(time: number) {
   animationFrame = requestAnimationFrame(render)
-  if (!renderer || !material || !scene || !camera) return
-  material.uniforms.uTime.value = time / 1000
-  renderer.render(scene, camera)
+  const seconds = time * 0.001
+  if (material1) material1.uniforms.uTime.value = seconds
+  if (material2) material2.uniforms.uTime.value = seconds
+  if (renderer1 && scene1 && camera1) renderer1.render(scene1, camera1)
+  if (renderer2 && scene2 && camera2) renderer2.render(scene2, camera2)
 }
 
 onMounted(async () => {
-  const app = document.getElementById('app')
-  appScroller = app
-  const pageElements = [document.documentElement, document.body, app].filter(Boolean) as HTMLElement[]
-  pageStyles = pageElements.map(element => [element, element.style.overflowY, element.style.overflowX])
-  pageElements.forEach(element => {
-    element.style.overflowY = 'auto'
-    element.style.overflowX = 'hidden'
-  })
-  window.scrollTo(0, 0)
-  if (appScroller) appScroller.scrollTop = 0
+  if (scrollRoot.value) scrollRoot.value.scrollTop = 0
 
-  if (!canvas.value) return
+  if (!canvas1.value || !canvas2.value || !stage.value || !scrollRoot.value) return
+
   try {
-    renderer = new THREE.WebGLRenderer({
-      canvas: canvas.value,
-      antialias: false,
-      powerPreference: 'high-performance',
-      preserveDrawingBuffer: true,
-    })
-    renderer.outputColorSpace = THREE.SRGBColorSpace
-    let shaderFailed = false
-    renderer.debug.checkShaderErrors = true
-    renderer.debug.onShaderError = (gl, program, vertexShaderObject, fragmentShaderObject) => {
-      shaderFailed = true
-      console.error(
-        'Transition shader link error',
-        `program=${gl.getProgramInfoLog(program) || ''}`,
-        `vertex=${gl.getShaderInfoLog(vertexShaderObject) || ''}`,
-        `fragment=${gl.getShaderInfoLog(fragmentShaderObject) || ''}`,
-      )
-    }
+    scene1 = new THREE.Scene()
+    scene2 = new THREE.Scene()
+    camera1 = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10)
+    camera2 = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10)
+    camera1.position.z = 1
+    camera2.position.z = 1
 
-    const loader = new THREE.TextureLoader()
-    ;[textureA, textureB] = await Promise.all([
-      loadTexture(loader, '/frames/hero/frame_0259.jpg'),
-      loadTexture(loader, '/images/fisherman.png'),
-    ])
-
-    const imageA = textureA.image as HTMLImageElement
-    const imageB = textureB.image as HTMLImageElement
-    material = new THREE.ShaderMaterial({
-      vertexShader,
-      fragmentShader,
-      depthTest: false,
-      depthWrite: false,
-      uniforms: {
-        uTextureA: { value: textureA },
-        uTextureB: { value: textureB },
-        uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-        uTextureASize: { value: new THREE.Vector2(imageA.naturalWidth || imageA.width, imageA.naturalHeight || imageA.height) },
-        uTextureBSize: { value: new THREE.Vector2(imageB.naturalWidth || imageB.width, imageB.naturalHeight || imageB.height) },
-        uRadius: { value: 2 },
-        uSketch: { value: 1 },
-        uEdge: { value: 0 },
-        uTime: { value: 0 },
-      },
-    })
+    renderer1 = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+    renderer2 = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+    renderer1.setSize(window.innerWidth, window.innerHeight)
+    renderer2.setSize(window.innerWidth, window.innerHeight)
+    canvas1.value.appendChild(renderer1.domElement)
+    canvas2.value.appendChild(renderer2.domElement)
 
     geometry = new THREE.PlaneGeometry(2, 2)
-    mesh = new THREE.Mesh(geometry, material)
-    mesh.frustumCulled = false
-    scene = new THREE.Scene()
-    camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 2)
-    camera.position.z = 1
-    scene.add(mesh)
+    const loader = new THREE.TextureLoader()
+    ;[texture1, texture2] = await Promise.all([
+      loadTexture(loader, '/images/fx-art-1.png'),
+      loadTexture(loader, '/images/fx-art-2.jpg'),
+    ])
 
-    resizeRenderer()
-    updateTimeline(0)
-    renderer.compile(scene, camera)
-    renderer.render(scene, camera)
-    if (shaderFailed) throw new Error('WebGL shader compilation failed')
+    const image1 = texture1.image as HTMLImageElement
+    const image2 = texture2.image as HTMLImageElement
 
-    window.addEventListener('resize', resizeRenderer)
-    window.addEventListener('resize', updateFromScroll)
-    window.addEventListener('scroll', updateFromScroll, { passive: true })
-    appScroller?.addEventListener('scroll', updateFromScroll, { passive: true })
+    material1 = new THREE.ShaderMaterial({
+      uniforms: {
+        uTexture: { value: texture1 },
+        uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+        uImageResolution: { value: new THREE.Vector2(image1.width, image1.height) },
+        uDissolve: { value: 0 },
+        uCenter: { value: new THREE.Vector2(0.5, 0.5) },
+        uTime: { value: 0 },
+        uIdleMotion: {
+          value: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1,
+        },
+        uGrayscale: { value: 0 },
+        uEdgeIntensity: { value: 0 },
+        uEdgeBrightness: { value: 1 },
+      },
+      vertexShader: coverVertexShader,
+      fragmentShader: coverFragmentShader,
+      transparent: true,
+    })
+
+    material2 = new THREE.ShaderMaterial({
+      uniforms: {
+        uTexture: { value: texture2 },
+        uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+        uImageResolution: { value: new THREE.Vector2(image2.width, image2.height) },
+        uDissolve: { value: 0 },
+        uCenter: { value: new THREE.Vector2(0.5, 0.5) },
+        uTime: { value: 0 },
+        uBrightness: { value: 0 },
+        uEdgeIntensity: { value: 0.6 },
+        uDarkness: { value: 1 },
+        uGrayscale: { value: 1 },
+      },
+      vertexShader: coverVertexShader,
+      fragmentShader: coverFragmentShaderReverse,
+      transparent: true,
+    })
+
+    scene1.add(new THREE.Mesh(geometry, material1))
+    scene2.add(new THREE.Mesh(geometry, material2))
+
+    if (dynamicText.value) {
+      textTimeline = gsap.timeline({ paused: true })
+      textTimeline
+        .to(dynamicText.value, { opacity: 0, filter: 'blur(20px)', ease: 'none' }, 0)
+        .to(dynamicText.value, { opacity: 1, filter: 'blur(0px)', ease: 'none' }, 0.6)
+    }
+
+    window.addEventListener('resize', resize)
+    scrollRoot.value.addEventListener('scroll', handlePageScroll, { passive: true })
+    syncTransitionFromScroll()
     loading.value = false
-    shaderReady.value = true
-    updateFromScroll()
     animationFrame = requestAnimationFrame(render)
   } catch (error) {
-    console.error('Transition shader failed:', error)
+    console.error('Original FX transition failed:', error)
     loading.value = false
     loadError.value = true
-    shaderReady.value = false
   }
 })
 
 onUnmounted(() => {
   cancelAnimationFrame(animationFrame)
-  window.removeEventListener('resize', resizeRenderer)
-  window.removeEventListener('resize', updateFromScroll)
-  window.removeEventListener('scroll', updateFromScroll)
-  appScroller?.removeEventListener('scroll', updateFromScroll)
-  pageStyles.forEach(([element, overflowY, overflowX]) => {
-    element.style.overflowY = overflowY
-    element.style.overflowX = overflowX
-  })
-  appScroller = null
-  textureA?.dispose()
-  textureB?.dispose()
+  cancelAnimationFrame(scrollSyncFrame)
+  window.removeEventListener('resize', resize)
+  scrollRoot.value?.removeEventListener('scroll', handlePageScroll)
+  textTimeline?.kill()
+  texture1?.dispose()
+  texture2?.dispose()
   geometry?.dispose()
-  material?.dispose()
-  scene?.clear()
-  renderer?.dispose()
-  renderer = null
-  material = null
-  mesh = null
-  scene = null
-  camera = null
+  material1?.dispose()
+  material2?.dispose()
+  scene1?.clear()
+  scene2?.clear()
+  renderer1?.dispose()
+  renderer2?.dispose()
+  renderer1?.domElement.remove()
+  renderer2?.domElement.remove()
 })
 </script>
 
 <style scoped>
-.shader-test {
-  position: relative;
+.fx-page {
+  position: fixed;
+  inset: 0;
   width: 100%;
-  height: 560vh;
-  background: #060706;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  background: #000;
 }
 
-.shader-viewport {
+.fx-stage {
+  position: relative;
+  width: 100%;
+  height: 300vh;
+  overflow: clip;
+  background: #000;
+}
+
+.fx-viewport {
   position: sticky;
   top: 0;
   width: 100%;
   height: 100vh;
   height: 100svh;
   overflow: hidden;
-  background: #060706;
+  background: #000;
 }
 
-.shader-canvas,
-.shader-fallback {
+.fx-canvas {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+}
+
+.fx-canvas :deep(canvas) {
   display: block;
+  width: 100%;
+  height: 100%;
 }
 
-.shader-canvas {
-  opacity: 0;
+.fx-canvas--front {
+  z-index: 2;
 }
 
-.shader-canvas.is-ready {
-  opacity: 1;
+.fx-canvas--back {
+  z-index: 1;
 }
 
-.shader-fallback {
-  object-fit: cover;
-}
-
-.shader-label {
+.text-overlay {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  z-index: 3;
-  transform: translate(-50%, -50%);
-  color: #fff;
-  font-family: Inter, sans-serif;
-  font-size: clamp(0.72rem, 1.25vw, 1rem);
-  font-weight: 700;
-  letter-spacing: 0.44em;
-  line-height: 1;
-  text-align: center;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.48);
-  transition: opacity 50ms linear;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   pointer-events: none;
 }
 
-.shader-status {
+.dynamic-text {
+  color: #fff;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: clamp(2rem, 6vw, 5rem);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.3em;
+  text-align: center;
+  text-transform: uppercase;
+  text-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+  opacity: 1;
+  filter: blur(0);
+  will-change: opacity, filter;
+}
+
+.fx-status {
   position: absolute;
   top: 50%;
   left: 50%;
-  z-index: 4;
+  z-index: 20;
   transform: translate(-50%, -50%);
-  color: rgba(255, 255, 255, 0.66);
-  font-family: Inter, sans-serif;
-  font-size: 0.64rem;
-  letter-spacing: 0.15em;
+  color: rgba(255, 255, 255, 0.7);
+  font: 600 0.66rem/1 Inter, sans-serif;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   white-space: nowrap;
 }
 
 @media (max-width: 700px) {
-  .shader-test {
-    height: 650vh;
+  .dynamic-text {
+    max-width: 90vw;
+    font-size: clamp(1.35rem, 9vw, 3rem);
+    letter-spacing: 0.2em;
   }
 }
 </style>
