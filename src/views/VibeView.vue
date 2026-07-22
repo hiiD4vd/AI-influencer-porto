@@ -31,20 +31,12 @@
 
     <!-- Scroll container -->
     <div class="scroll-container" ref="scrollContainer">
-      <div class="intro-interactive-frame">
-        <FluidVideoHero shared-frame />
-        <section class="hero-profession-strip" aria-label="Explore Kevin AI professions">
-          <ProfessionMarquee :fluid-enabled="false" />
-        </section>
-        <div class="hero-fluid-spacer" aria-hidden="true"></div>
-      </div>
+      <ScratchTransitionTestView
+        embedded
+        :class="{ 'is-handoff-complete': !fluidHeroActive }"
+      />
       <div ref="introTransitionMarker" class="intro-transition-marker" aria-hidden="true"></div>
     </div>
-
-    <VibeIntroTransition
-      :progress="introTransitionProgress"
-      :active="introTransitionActive"
-    />
 
     <section
       ref="welcomeScene"
@@ -72,6 +64,21 @@
       </div>
     </section>
 
+    <section
+      v-show="cabinBridgeActive"
+      ref="cabinBridgeScene"
+      class="cabin-bridge-scene"
+      aria-label="Airplane cabin wall"
+      :aria-hidden="!cabinBridgeActive"
+    >
+      <img
+        class="cabin-bridge-image"
+        src="/images/background kabin.png"
+        alt="Airplane cabin wall"
+        draggable="false"
+      />
+    </section>
+
     <!-- Carousel scene — mounts on top of canvas, card starts at EXACT canvas position -->
     <canvas
       v-show="cabinTransitionActive"
@@ -80,9 +87,12 @@
       aria-hidden="true"
     ></canvas>
 
+    <WingsuitFlightSection :progress="wingsuitSectionProgress" />
+
     <section v-if="showCabinScene" ref="embeddedCabinScene" class="embedded-cabin-scene">
       <CabinTestView
         embedded
+        :active="cabinSceneActive"
         :paused="fishermanTransitionProgress > 0"
         :chime-audio-element="preparedCabinChime"
         :announcement-audio-element="preparedCabinAnnouncement"
@@ -158,9 +168,8 @@ import Lenis from 'lenis'
 import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import CabinTestView from './CabinTestView.vue'
-import FluidVideoHero from '../components/FluidVideoHero.vue'
-import ProfessionMarquee from '../components/ProfessionMarquee.vue'
-import VibeIntroTransition from '../components/VibeIntroTransition.vue'
+import ScratchTransitionTestView from './ScratchTransitionTestView.vue'
+import WingsuitFlightSection from '../components/WingsuitFlightSection.vue'
 
 gsap.registerPlugin(ScrollTrigger)
 
@@ -184,8 +193,12 @@ const HOTSPOTS = [
 
 // ── Frame sequence config ─────────────────────────────────────────────────
 const TOTAL_FRAMES = 259
+const TRANSITION_SEQUENCE_LAST_FRAME = 34
 const SCROLL_PX_PER_FRAME = 12
 const FRAME_PATH = (i: number) => `/frames/hero/frame_${String(i).padStart(4, '0')}.jpg`
+const REDBULL_TOTAL_FRAMES = 224
+const REDBULL_SCROLL_PX_PER_FRAME = 12
+const REDBULL_FRAME_PATH = (i: number) => `/frames/redbull/frame_${String(i).padStart(4, '0')}.webp`
 
 const LAST_FRAME_PNG = { w: 1920, h: 1080 }
 const CARD_IN_PNG = {
@@ -219,15 +232,17 @@ const typedSubtitle  = ref('')
 const gymAudioPrompt = ref('')
 const cabinTransitionCanvas = ref<HTMLCanvasElement | null>(null)
 const cabinTransitionActive = ref(false)
+const cabinBridgeScene = ref<HTMLElement | null>(null)
+const cabinBridgeActive = ref(false)
+const cabinSceneActive = ref(false)
 const showCabinScene = ref(false)
 const embeddedCabinScene = ref<HTMLElement | null>(null)
 const cabinScrollUnlocked = ref(false)
 const cabinScrollLocked = ref(false)
 const fishermanScrollUnlocked = ref(false)
+const wingsuitSectionProgress = ref(0)
 const fluidHeroActive = ref(true)
 const introTransitionMarker = ref<HTMLElement | null>(null)
-const introTransitionProgress = ref(0)
-const introTransitionActive = ref(false)
 const preparedCabinChime = shallowRef<HTMLAudioElement | null>(null)
 const preparedCabinAnnouncement = shallowRef<HTMLAudioElement | null>(null)
 
@@ -277,17 +292,21 @@ let povDragOriginY = 0
 let cabinTransitionProgress = 0
 let cabinTransitionImage: HTMLImageElement | null = null
 let fishermanImage: HTMLImageElement | null = null
-let frozenGymFrame: HTMLCanvasElement | null = null
+const redbullFrames: Array<HTMLImageElement | undefined> = new Array(REDBULL_TOTAL_FRAMES)
+const redbullFramePromises = new Map<number, Promise<HTMLImageElement | null>>()
 let frozenCabinFrame: HTMLCanvasElement | null = null
-let cabinHandoffTimeout: ReturnType<typeof setTimeout> | null = null
 let baseStoryScrollHeight = 0
 let storyScrollStart = 0
-let introTransitionStart = 0
-let introTransitionDistance = 0
+let transitionSequenceStart = 0
+let transitionSequenceDistance = 1
 let heroScrollEnd = 0
 let cabinScrollDistance = 0
 let fishermanScrollDistance = 0
 let fishermanTransitionProgress = 0
+let redbullScrollDistance = 0
+let redbullSequenceProgress = 0
+let wingsuitScrollDistance = 0
+let redbullPreloadCancelled = false
 let previousWelcomeVideoTime = 0
 let gymPlaybackSession = 0
 let gymUnlockTimer: ReturnType<typeof setTimeout> | null = null
@@ -871,6 +890,49 @@ function preloadFrames(): Promise<void> {
   })
 }
 
+function loadRedbullFrame(index: number): Promise<HTMLImageElement | null> {
+  const safeIndex = Math.max(0, Math.min(REDBULL_TOTAL_FRAMES - 1, index))
+  const cached = redbullFrames[safeIndex]
+  if (cached?.complete && cached.naturalWidth) return Promise.resolve(cached)
+
+  const pending = redbullFramePromises.get(safeIndex)
+  if (pending) return pending
+
+  const request = new Promise<HTMLImageElement | null>(resolve => {
+    const image = new Image()
+    image.decoding = 'async'
+    image.onload = () => {
+      redbullFrames[safeIndex] = image
+      redbullFramePromises.delete(safeIndex)
+      if (redbullSequenceProgress > 0) renderRedbullSequence(redbullSequenceProgress)
+      resolve(image)
+    }
+    image.onerror = () => {
+      redbullFramePromises.delete(safeIndex)
+      resolve(null)
+    }
+    image.src = REDBULL_FRAME_PATH(safeIndex + 1)
+  })
+
+  redbullFramePromises.set(safeIndex, request)
+  return request
+}
+
+async function preloadRedbullFrames() {
+  redbullPreloadCancelled = false
+  await loadRedbullFrame(0)
+
+  let nextIndex = 1
+  const worker = async () => {
+    while (!redbullPreloadCancelled && nextIndex < REDBULL_TOTAL_FRAMES) {
+      const index = nextIndex++
+      await loadRedbullFrame(index)
+    }
+  }
+
+  await Promise.all(Array.from({ length: 6 }, worker))
+}
+
 // ── Resize ────────────────────────────────────────────────────────────────
 function resizeCanvas() {
   if (!canvasEl.value) return
@@ -878,11 +940,18 @@ function resizeCanvas() {
   canvasEl.value.height = window.innerHeight
   drawFrame(Math.round(currentFrame))
   if (cabinTransitionActive.value) {
-    if (fishermanTransitionProgress > 0.0001) {
+    if (redbullSequenceProgress > 0.0001) {
+      renderRedbullSequence(redbullSequenceProgress)
+    } else if (fishermanTransitionProgress > 0.0001) {
       renderFishermanTransition(fishermanTransitionProgress)
-    } else {
-      renderCabinTransition(cabinTransitionProgress)
     }
+  }
+
+  updateCabinPanels(cabinTransitionProgress)
+
+  if (baseStoryScrollHeight > 0) {
+    wingsuitScrollDistance = Math.max(1400, window.innerHeight * 1.8)
+    updateStoryScrollHeight()
   }
 }
 
@@ -915,125 +984,6 @@ function preloadCabinTransitionAsset(): Promise<boolean> {
   }
 
   return cabinTransitionAssetPromise
-}
-
-function captureWelcomeFrame() {
-  const canvas = cabinTransitionCanvas.value
-  if (!canvas) return false
-
-  const width = window.innerWidth
-  const height = window.innerHeight
-  canvas.width = width
-  canvas.height = height
-  const frame = document.createElement('canvas')
-  frame.width = width
-  frame.height = height
-  const frameContext = frame.getContext('2d')
-  if (!frameContext) return false
-
-  // The morph must always begin from the authored Gym still (the final hero
-  // frame), not from an arbitrary moment or POV offset in the looping video.
-  // This creates the intended clean cut: live video -> original Gym image ->
-  // scroll-driven camera pullback into the airplane cabin.
-  const gymStill = images[TOTAL_FRAMES - 1]
-  if (!gymStill?.complete || !gymStill.naturalWidth) return false
-  const scale = Math.max(width / gymStill.naturalWidth, height / gymStill.naturalHeight)
-  const drawWidth = gymStill.naturalWidth * scale
-  const drawHeight = gymStill.naturalHeight * scale
-  frameContext.drawImage(
-    gymStill,
-    (width - drawWidth) / 2,
-    (height - drawHeight) / 2,
-    drawWidth,
-    drawHeight
-  )
-
-  frozenGymFrame = frame
-  return true
-}
-
-function renderCabinTransition(progress: number) {
-  const canvas = cabinTransitionCanvas.value
-  const cabin = cabinTransitionImage
-  const gym = frozenGymFrame
-  if (!canvas || !cabin || !gym) return
-  const context = canvas.getContext('2d')
-  if (!context) return
-
-  if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
-    canvas.width = window.innerWidth
-    canvas.height = window.innerHeight
-  }
-
-  const viewWidth = canvas.width
-  const viewHeight = canvas.height
-  const viewAspect = viewWidth / viewHeight
-  const imageWidth = cabin.naturalWidth
-  const imageHeight = cabin.naturalHeight
-  const imageAspect = imageWidth / imageHeight
-
-  // Fit the initial camera fully inside the transparent opening on both wide
-  // desktop screens and tall mobile screens, so the first transition frame is
-  // indistinguishable from the frozen full-screen Gym image.
-  const startWidth = Math.min(
-    imageWidth * 0.098,
-    imageHeight * 0.285 * viewAspect
-  )
-  const startHeight = startWidth / viewAspect
-  const startX = imageWidth * 0.505 - startWidth / 2
-  const startY = imageHeight * 0.5 - startHeight / 2
-
-  const finalZoom = 1.34
-  let finalWidth: number
-  let finalHeight: number
-  if (imageAspect > viewAspect) {
-    finalHeight = imageHeight / finalZoom
-    finalWidth = finalHeight * viewAspect
-  } else {
-    finalWidth = imageWidth / finalZoom
-    finalHeight = finalWidth / viewAspect
-  }
-  const finalX = (imageWidth - finalWidth) / 2
-  const finalY = (imageHeight - finalHeight) / 2
-
-  const eased = progress * progress * (3 - 2 * progress)
-  // Multiplicative interpolation behaves like a camera dolly: every scroll
-  // step changes scale proportionally instead of suddenly flattening the wall.
-  const cropWidth = startWidth * Math.pow(finalWidth / startWidth, eased)
-  const cropHeight = startHeight * Math.pow(finalHeight / startHeight, eased)
-  const startCenterX = startX + startWidth / 2
-  const startCenterY = startY + startHeight / 2
-  const finalCenterX = finalX + finalWidth / 2
-  const finalCenterY = finalY + finalHeight / 2
-  const cropCenterX = startCenterX + (finalCenterX - startCenterX) * eased
-  const cropCenterY = startCenterY + (finalCenterY - startCenterY) * eased
-  const cropX = cropCenterX - cropWidth / 2
-  const cropY = cropCenterY - cropHeight / 2
-
-  const skyGradient = context.createLinearGradient(0, 0, 0, viewHeight)
-  skyGradient.addColorStop(0, '#49B2E7')
-  skyGradient.addColorStop(1, '#BDDAEC')
-  // The frozen Gym fills the complete background plane. The transparent
-  // window opening performs the crop, so rectangular snapshot edges can never
-  // appear inside the window.
-  context.drawImage(gym, 0, 0, viewWidth, viewHeight)
-  context.save()
-  context.globalAlpha = smoothstep(0.66, 0.96, progress)
-  context.fillStyle = skyGradient
-  context.fillRect(0, 0, viewWidth, viewHeight)
-  context.restore()
-
-  context.drawImage(
-    cabin,
-    cropX,
-    cropY,
-    cropWidth,
-    cropHeight,
-    0,
-    0,
-    viewWidth,
-    viewHeight
-  )
 }
 
 function renderFishermanTransition(progress: number) {
@@ -1146,6 +1096,51 @@ function renderFishermanTransition(progress: number) {
   }
 }
 
+function renderRedbullSequence(progress: number) {
+  const canvas = cabinTransitionCanvas.value
+  if (!canvas) return
+  const context = canvas.getContext('2d')
+  if (!context) return
+
+  if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+    canvas.width = window.innerWidth
+    canvas.height = window.innerHeight
+  }
+
+  const frameIndex = Math.round(clamp01(progress) * (REDBULL_TOTAL_FRAMES - 1))
+  let image = redbullFrames[frameIndex]
+  if (!image?.complete || !image.naturalWidth) {
+    void loadRedbullFrame(frameIndex)
+    for (let offset = 1; offset < REDBULL_TOTAL_FRAMES; offset++) {
+      const before = redbullFrames[frameIndex - offset]
+      const after = redbullFrames[frameIndex + offset]
+      if (before?.complete && before.naturalWidth) {
+        image = before
+        break
+      }
+      if (after?.complete && after.naturalWidth) {
+        image = after
+        break
+      }
+    }
+  }
+  if (!image?.complete || !image.naturalWidth) return
+
+  const viewWidth = canvas.width
+  const viewHeight = canvas.height
+  const scale = Math.max(viewWidth / image.naturalWidth, viewHeight / image.naturalHeight)
+  const drawWidth = image.naturalWidth * scale
+  const drawHeight = image.naturalHeight * scale
+  context.clearRect(0, 0, viewWidth, viewHeight)
+  context.drawImage(
+    image,
+    (viewWidth - drawWidth) / 2,
+    (viewHeight - drawHeight) / 2,
+    drawWidth,
+    drawHeight,
+  )
+}
+
 function captureCabinFrame() {
   const source = embeddedCabinScene.value?.querySelector('canvas')
   if (!(source instanceof HTMLCanvasElement)) return
@@ -1162,7 +1157,9 @@ function updateStoryScrollHeight() {
   if (!scrollContainer.value) return
   const cabinHeight = cabinScrollUnlocked.value ? cabinScrollDistance : 0
   const fishermanHeight = fishermanScrollUnlocked.value ? fishermanScrollDistance : 0
-  const extraHeight = cabinHeight + fishermanHeight
+  const redbullHeight = fishermanScrollUnlocked.value ? redbullScrollDistance : 0
+  const wingsuitHeight = fishermanScrollUnlocked.value ? wingsuitScrollDistance : 0
+  const extraHeight = cabinHeight + fishermanHeight + redbullHeight + wingsuitHeight
   scrollContainer.value.style.height = `${window.innerHeight + storyScrollStart + baseStoryScrollHeight + extraHeight}px`
   requestAnimationFrame(() => lenis?.resize())
 }
@@ -1191,15 +1188,12 @@ async function resumeGymFromBeginning() {
   const playbackSession = ++gymPlaybackSession
   showWelcome.value = true
   cabinScrollLocked.value = false
+  cabinBridgeActive.value = false
+  cabinSceneActive.value = false
   showCabinScene.value = false
   cabinTransitionActive.value = false
-  frozenGymFrame = null
   frozenCabinFrame = null
   typedSubtitle.value = ''
-  if (cabinHandoffTimeout) {
-    clearTimeout(cabinHandoffTimeout)
-    cabinHandoffTimeout = null
-  }
   if (!video) return
   video.currentTime = 0
   video.muted = true
@@ -1225,6 +1219,27 @@ async function resumeGymFromBeginning() {
   }
 }
 
+function updateCabinPanels(progress: number) {
+  const nextProgress = clamp01(progress)
+  const firstSectionProgress = clamp01(nextProgress * 2)
+  const secondSectionProgress = clamp01((nextProgress - 0.5) * 2)
+
+  if (welcomeScene.value) {
+    welcomeScene.value.style.transform = `translate3d(0, ${-firstSectionProgress * window.innerHeight}px, 0)`
+  }
+
+  if (cabinBridgeScene.value) {
+    const bridgeY = nextProgress <= 0.5
+      ? (1 - firstSectionProgress) * window.innerHeight
+      : -secondSectionProgress * window.innerHeight
+    cabinBridgeScene.value.style.transform = `translate3d(0, ${bridgeY}px, 0)`
+  }
+
+  if (embeddedCabinScene.value) {
+    embeddedCabinScene.value.style.transform = `translate3d(0, ${(1 - secondSectionProgress) * window.innerHeight}px, 0)`
+  }
+}
+
 function updateCabinFromScroll(progress: number) {
   const nextProgress = clamp01(progress)
   const previousProgress = cabinTransitionProgress
@@ -1232,45 +1247,33 @@ function updateCabinFromScroll(progress: number) {
 
   if (nextProgress <= 0.0001) {
     if (previousProgress > 0.0001 || showCabinScene.value) resumeGymFromBeginning()
+    updateCabinPanels(0)
     return
   }
 
-  if (!frozenGymFrame) {
-    if (!cabinTransitionImage || !captureWelcomeFrame()) return
-    removeCabinAudioPrimeListeners()
-    stopGymMedia()
-    typedSubtitle.value = ''
+  cabinTransitionActive.value = false
+  cabinBridgeActive.value = true
+  if (nextProgress < 0.995 && cabinSceneActive.value) cabinSceneActive.value = false
+  if (nextProgress < 0.5) showWelcome.value = true
+  if (nextProgress >= 0.5 && !showCabinScene.value) {
+    showCabinScene.value = true
+    requestAnimationFrame(() => updateCabinPanels(cabinTransitionProgress))
   }
+  if (nextProgress < 0.5 && showCabinScene.value) showCabinScene.value = false
+  updateCabinPanels(nextProgress)
 
-  if (nextProgress < 0.995) {
-    if (cabinHandoffTimeout) {
-      clearTimeout(cabinHandoffTimeout)
-      cabinHandoffTimeout = null
-    }
-    showCabinScene.value = false
-    cabinTransitionActive.value = true
-    renderCabinTransition(nextProgress)
-    return
-  }
-
-  renderCabinTransition(1)
-  cabinTransitionActive.value = true
-  if (!showCabinScene.value) {
+  if (nextProgress >= 0.995 && !cabinSceneActive.value) {
+    cabinSceneActive.value = true
     showWelcome.value = false
     stopGymMedia()
     lenis?.stop()
     cabinScrollLocked.value = true
-    showCabinScene.value = true
   }
 }
 
 function handleEmbeddedCabinReady() {
   if (!showCabinScene.value) return
-  // The transition remains visible until the Cabin canvas has drawn its first
-  // real frame, so clouds and camera motion are already running at handoff.
-  requestAnimationFrame(() => {
-    cabinTransitionActive.value = false
-  })
+  requestAnimationFrame(() => updateCabinPanels(cabinTransitionProgress))
 }
 
 function handleCabinScrollUnlocked() {
@@ -1285,8 +1288,6 @@ function updateFishermanFromScroll(progress: number) {
   const previousProgress = fishermanTransitionProgress
   fishermanTransitionProgress = clamp01(progress)
   if (fishermanTransitionProgress <= 0.0001) {
-    // Do not hide the Gym -> Cabin morph canvas here. This function is also
-    // called with zero progress throughout that earlier transition.
     if (previousProgress > 0.0001) {
       cabinTransitionActive.value = false
       frozenCabinFrame = null
@@ -1299,22 +1300,45 @@ function updateFishermanFromScroll(progress: number) {
   renderFishermanTransition(fishermanTransitionProgress)
 }
 
+function updateRedbullFromScroll(progress: number) {
+  const previousProgress = redbullSequenceProgress
+  redbullSequenceProgress = clamp01(progress)
+
+  if (redbullSequenceProgress <= 0.0001) {
+    if (previousProgress > 0.0001 && fishermanTransitionProgress >= 0.999) {
+      cabinTransitionActive.value = true
+      renderFishermanTransition(1)
+    }
+    return
+  }
+
+  cabinTransitionActive.value = true
+  renderRedbullSequence(redbullSequenceProgress)
+}
+
 // ── Setup scroll ──────────────────────────────────────────────────────────
 function setupScroll() {
   if (!scrollContainer.value || !viewRoot.value) return
   const videoScrollHeight = TOTAL_FRAMES * SCROLL_PX_PER_FRAME
   baseStoryScrollHeight = videoScrollHeight
-  // Match the shader boundary to the real bottom edge of the intro frame.
-  // Across exactly one viewport of scrolling, both edges travel from the
-  // bottom to the top together, so the profession strip never teleports.
+  // The complete FX test owns everything through the first sequence frame.
+  // A viewport-height sticky panel stops sticking one viewport before its
+  // containing stage ends. Handoff there, before the FX canvas can slide up
+  // and expose the sequence canvas as a second layer underneath it.
   const introMarkerTop = introTransitionMarker.value?.offsetTop
-    ?? Math.round(window.innerHeight * 2.42)
-  introTransitionStart = Math.max(0, introMarkerTop - window.innerHeight)
-  introTransitionDistance = Math.max(1, window.innerHeight)
-  storyScrollStart = introTransitionStart + introTransitionDistance
+    ?? Math.round(window.innerHeight * 5.88)
+  storyScrollStart = Math.max(0, introMarkerTop - window.innerHeight)
+  const introStage = scrollContainer.value.querySelector<HTMLElement>('.fx-stage')
+  transitionSequenceStart = Math.max(
+    0,
+    introStage?.offsetTop ?? storyScrollStart - window.innerHeight * 2,
+  )
+  transitionSequenceDistance = Math.max(1, storyScrollStart - transitionSequenceStart)
   heroScrollEnd = storyScrollStart + videoScrollHeight
-  cabinScrollDistance = Math.max(2800, window.innerHeight * 3.2)
+  cabinScrollDistance = Math.max(1800, window.innerHeight * 2)
   fishermanScrollDistance = Math.max(2400, window.innerHeight * 2.8)
+  redbullScrollDistance = REDBULL_TOTAL_FRAMES * REDBULL_SCROLL_PX_PER_FRAME
+  wingsuitScrollDistance = Math.max(1400, window.innerHeight * 1.8)
   updateStoryScrollHeight()
 
   lenis?.destroy()
@@ -1333,21 +1357,31 @@ function setupScroll() {
     if (!cabinScrollUnlocked.value) {
       heroScrollEnd = Math.max(storyScrollStart + 1, limit || storyScrollStart + videoScrollHeight)
     }
-    fluidHeroActive.value = scroll < storyScrollStart
+    const nextFluidHeroActive = scroll < storyScrollStart
+    const completedIntroHandoff = fluidHeroActive.value && !nextFluidHeroActive
+    fluidHeroActive.value = nextFluidHeroActive
 
-    // Read the marker's actual on-screen position after Lenis has applied its
-    // smoothed scroll. Deriving this from `scroll` alone can drift from the DOM
-    // edge and expose the sequence as a thin, straight horizontal strip.
-    const markerViewportTop = introTransitionMarker.value?.getBoundingClientRect().top
-      ?? (window.innerHeight - (scroll - introTransitionStart))
-    introTransitionProgress.value = clamp01(
-      1 - markerViewportTop / Math.max(1, window.innerHeight),
-    )
-    introTransitionActive.value = markerViewportTop <= window.innerHeight && markerViewportTop > 0
-    const videoProgress = Math.max(0, Math.min(1, (scroll - storyScrollStart) / Math.max(1, heroScrollEnd - storyScrollStart)))
-    targetFrame = videoProgress >= 0.995
-      ? TOTAL_FRAMES - 1
-      : Math.round(videoProgress * (TOTAL_FRAMES - 1))
+    if (nextFluidHeroActive) {
+      const introSequenceProgress = Math.max(
+        0,
+        Math.min(1, (scroll - transitionSequenceStart) / transitionSequenceDistance),
+      )
+      targetFrame = Math.round(introSequenceProgress * TRANSITION_SEQUENCE_LAST_FRAME)
+    } else {
+      const videoProgress = Math.max(0, Math.min(1, (scroll - storyScrollStart) / Math.max(1, heroScrollEnd - storyScrollStart)))
+      targetFrame = videoProgress >= 0.995
+        ? TOTAL_FRAMES - 1
+        : TRANSITION_SEQUENCE_LAST_FRAME + Math.round(
+            videoProgress * (TOTAL_FRAMES - 1 - TRANSITION_SEQUENCE_LAST_FRAME),
+          )
+
+      // The WebGL outline finishes on this exact frame. Snap the hidden base
+      // canvas once at handoff so both layers match without a one-frame reset.
+      if (completedIntroHandoff) {
+        currentFrame = TRANSITION_SEQUENCE_LAST_FRAME
+        drawFrame(TRANSITION_SEQUENCE_LAST_FRAME)
+      }
+    }
 
     const transitionProgress = cabinScrollUnlocked.value
       ? (scroll - heroScrollEnd) / Math.max(1, cabinScrollDistance)
@@ -1358,6 +1392,22 @@ function setupScroll() {
       ? (scroll - heroScrollEnd - cabinScrollDistance) / Math.max(1, fishermanScrollDistance)
       : 0
     updateFishermanFromScroll(fishermanProgress)
+
+    const redbullProgress = fishermanScrollUnlocked.value
+      ? (scroll - heroScrollEnd - cabinScrollDistance - fishermanScrollDistance) / Math.max(1, redbullScrollDistance)
+      : 0
+    updateRedbullFromScroll(redbullProgress)
+
+    const wingsuitProgress = fishermanScrollUnlocked.value
+      ? (
+          scroll
+          - heroScrollEnd
+          - cabinScrollDistance
+          - fishermanScrollDistance
+          - redbullScrollDistance
+        ) / Math.max(1, wingsuitScrollDistance)
+      : 0
+    wingsuitSectionProgress.value = clamp01(wingsuitProgress)
 
     // The story now stays entirely scroll-driven. The former card carousel
     // must never replace the final canvas frame.
@@ -1397,6 +1447,7 @@ onMounted(async () => {
   drawFrame(0)
   setupScroll()
   tick()
+  void preloadRedbullFrames()
 })
 
 onUnmounted(() => {
@@ -1420,12 +1471,13 @@ onUnmounted(() => {
   window.removeEventListener('pointerup', handleWelcomePovUp)
   window.removeEventListener('pointercancel', handleWelcomePovUp)
   stopGymMedia()
-  if (cabinHandoffTimeout) clearTimeout(cabinHandoffTimeout)
-  frozenGymFrame = null
   frozenCabinFrame = null
   cabinTransitionImage = null
   cabinTransitionAssetPromise = null
   fishermanImage = null
+  redbullPreloadCancelled = true
+  redbullFramePromises.clear()
+  redbullFrames.fill(undefined)
   for (const audio of [preparedCabinChime.value, preparedCabinAnnouncement.value]) {
     if (!audio) continue
     audio.pause()
@@ -1495,11 +1547,31 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
+.cabin-bridge-scene {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  overflow: hidden;
+  background: #f4f4f3;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.cabin-bridge-image {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  object-position: center;
+  user-select: none;
+}
+
 .embedded-cabin-scene {
   position: fixed;
   inset: 0;
   z-index: 7;
   overflow: hidden;
+  will-change: transform;
 }
 
 .scroll-container {
@@ -1509,66 +1581,10 @@ onUnmounted(() => {
   max-width: none;
 }
 
-.intro-interactive-frame {
-  position: relative;
-  width: 100%;
-  isolation: isolate;
-  overflow: visible;
-  background: transparent;
-}
-
-.intro-interactive-frame::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background: #fff;
-  pointer-events: none;
-}
-
-.hero-profession-strip {
-  position: relative;
-  z-index: 3;
-  width: 100vw;
-  height: clamp(320px, 48vh, 520px);
-  overflow: hidden;
-  background: transparent;
-}
-
-.hero-profession-strip :deep(.profession-marquee) {
-  --item-height: min(42vh, 450px);
-  --item-gap: clamp(12px, 1.8vw, 30px);
-  background: transparent;
-}
-
-.hero-fluid-spacer {
-  position: relative;
-  z-index: 3;
-  width: 100%;
-  height: clamp(160px, 26vh, 300px);
-  background: transparent;
-  pointer-events: none;
-}
-
 .intro-transition-marker {
   width: 100%;
   height: 1px;
   pointer-events: none;
-}
-
-@media (max-width: 700px) {
-  .hero-profession-strip {
-    height: clamp(250px, 40vh, 370px);
-  }
-
-  .hero-profession-strip :deep(.profession-marquee) {
-    --item-height: min(34vh, 315px);
-    --item-gap: 14px;
-  }
-
-  .hero-fluid-spacer {
-    height: clamp(120px, 22svh, 210px);
-  }
 }
 
 .welcome-scene {
@@ -1580,6 +1596,15 @@ onUnmounted(() => {
   visibility: visible;
   opacity: 0;
   pointer-events: none;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-scene,
+  .cabin-bridge-scene,
+  .embedded-cabin-scene {
+    will-change: auto;
+  }
 }
 
 .welcome-scene.is-active {

@@ -92,7 +92,10 @@ const boundaryFragmentShader = /* glsl */ `
     float steppedInput = sin(vUv.x * 127.0 + motionTime * 0.90) * 0.0045;
     float columns = floor(steppedInput / 0.003 + 0.5) * 0.003;
 
-    float baseFront = uProgress;
+    // Keep the animated front slightly ahead of the straight DOM section
+    // edge. The extra overlap hides that edge behind the authored wave instead
+    // of exposing a flat white seam between sections.
+    float baseFront = min(1.12, uProgress + 0.055);
     // Geometry uses exactly the same deterministic waves as the CSS clip.
     // Noise remains available for pixel texture, but never shifts the actual
     // boundary independently and therefore cannot open a white/black seam.
@@ -131,7 +134,9 @@ function smoothstepNumber(start: number, end: number, value: number) {
 
 function updateEtchedClip(time: number) {
   const amount = clamp01(props.progress)
-  const baseY = (1 - amount) * 100
+  // Must match the +0.055 lead in the WebGL boundary above. Both the etched
+  // image and its luminous contour move 5.5vh ahead of the DOM edge.
+  const baseY = (1 - amount) * 100 - 5.5
   const seconds = reducedMotion ? 0 : time * 0.001
   const points: string[] = []
   const segments = 48

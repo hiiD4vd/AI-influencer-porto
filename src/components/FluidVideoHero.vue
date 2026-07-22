@@ -53,9 +53,14 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import * as THREE from 'three'
 
-const props = withDefaults(defineProps<{ showControls?: boolean; sharedFrame?: boolean }>(), {
+const props = withDefaults(defineProps<{
+  showControls?: boolean
+  sharedFrame?: boolean
+  clipSharedBottom?: boolean
+}>(), {
   showControls: false,
   sharedFrame: false,
+  clipSharedBottom: true,
 })
 const emit = defineEmits<{ continue: [] }>()
 
@@ -95,7 +100,7 @@ const shaders = {
     void main(){ gl_FragColor=value*texture2D(uTexture,vUv); }`,
   display: `${precision} ${samplerPrecision}
     uniform sampler2D uTexture,uVideoTexture;
-    uniform float threshold,edgeSoftness,uSharedMode,uHeroBoundary,uSharedBottomBoundary,uTime;
+    uniform float threshold,edgeSoftness,uSharedMode,uHeroBoundary,uSharedBottomBoundary,uClipSharedBottom,uTime;
     uniform vec2 uResolution,uHeroResolution,uMediaResolution;
     varying vec2 vUv;
 
@@ -135,7 +140,7 @@ const shaders = {
         + sin(vUv.x * 32.04 - uTime * 0.45) * 0.009
         + sin(vUv.x * 69.0 + uTime * 0.30) * 0.004;
       float sharedBoundaryMask=smoothstep(sharedWave-.008,sharedWave+.006,vUv.y);
-      float boundaryMask=mix(1.,sharedBoundaryMask,uSharedMode);
+      float boundaryMask=mix(1.,sharedBoundaryMask,uSharedMode*uClipSharedBottom);
       float alpha=reveal*moving.a*boundaryMask;
       gl_FragColor=vec4(moving.rgb*alpha,alpha);
     }`,
@@ -175,6 +180,7 @@ class FluidVideoSimulation {
   private heroElement: HTMLElement
   private canvasElement: HTMLCanvasElement
   private sharedFrame: boolean
+  private clipSharedBottom: boolean
   private readonly config = {
     simResolution: 256,
     dyeResolution: 1024,
@@ -189,12 +195,20 @@ class FluidVideoSimulation {
     edgeSoftness: 0,
   }
 
-  constructor(canvasElement: HTMLCanvasElement, host: HTMLElement, heroElement: HTMLElement, videoElement: HTMLVideoElement, sharedFrame: boolean) {
+  constructor(
+    canvasElement: HTMLCanvasElement,
+    host: HTMLElement,
+    heroElement: HTMLElement,
+    videoElement: HTMLVideoElement,
+    sharedFrame: boolean,
+    clipSharedBottom: boolean,
+  ) {
     this.host = host
     this.videoElement = videoElement
     this.heroElement = heroElement
     this.canvasElement = canvasElement
     this.sharedFrame = sharedFrame
+    this.clipSharedBottom = clipSharedBottom
     this.videoTexture = new THREE.VideoTexture(videoElement)
     this.videoTexture.colorSpace = THREE.SRGBColorSpace
     this.videoTexture.minFilter = THREE.LinearFilter
@@ -238,6 +252,7 @@ class FluidVideoSimulation {
         uSharedMode: number(this.sharedFrame ? 1 : 0),
         uHeroBoundary: number(0),
         uSharedBottomBoundary: number(0),
+        uClipSharedBottom: number(this.clipSharedBottom ? 1 : 0),
         uTime: number(0),
         uResolution: { value: new THREE.Vector2(this.width, this.height) },
         uHeroResolution: { value: new THREE.Vector2(this.width, this.height) },
@@ -463,7 +478,14 @@ onMounted(async () => {
   if (!canvas.value || !video.value || !hero.value) return
   const host = props.sharedFrame ? hero.value.parentElement : hero.value
   if (!host) return
-  simulation = new FluidVideoSimulation(canvas.value, host, hero.value, video.value, props.sharedFrame)
+  simulation = new FluidVideoSimulation(
+    canvas.value,
+    host,
+    hero.value,
+    video.value,
+    props.sharedFrame,
+    props.clipSharedBottom,
+  )
   host.addEventListener('pointermove', handlePointerMove, { passive: true })
   host.addEventListener('pointerdown', ensureVideoPlayback, { passive: true })
   host.addEventListener('touchstart', ensureVideoPlayback, { passive: true })

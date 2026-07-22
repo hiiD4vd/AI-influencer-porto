@@ -48,16 +48,18 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 
 const props = withDefaults(defineProps<{
   embedded?: boolean
   paused?: boolean
+  active?: boolean
   chimeAudioElement?: HTMLAudioElement | null
   announcementAudioElement?: HTMLAudioElement | null
 }>(), {
   embedded: false,
   paused: false,
+  active: true,
   chimeAudioElement: null,
   announcementAudioElement: null
 })
@@ -139,6 +141,7 @@ let chimeAudio: HTMLAudioElement | null = null
 let announcementAudio: HTMLAudioElement | null = null
 let audioStarted = false
 let audioStarting = false
+let audioPrepared = false
 let rafId = 0
 let subtitleRafId = 0
 let pointerId: number | null = null
@@ -263,6 +266,11 @@ function createClouds() {
 }
 
 function setupAudioSequence() {
+  if (audioPrepared) {
+    void tryStartAudio()
+    return
+  }
+
   chimeAudio = props.chimeAudioElement ?? new Audio('/audios/cabin_chime.mp3')
   announcementAudio = props.announcementAudioElement ?? new Audio('/audios/flight-attendant-announcement.mp3')
   if (!props.chimeAudioElement) chimeAudio.src = '/audios/cabin_chime.mp3'
@@ -274,11 +282,12 @@ function setupAudioSequence() {
 
   chimeAudio.addEventListener('ended', playAnnouncement)
   announcementAudio.addEventListener('ended', finishAnnouncement)
+  audioPrepared = true
   void tryStartAudio()
 }
 
 async function tryStartAudio() {
-  if (audioStarted || audioStarting || !chimeAudio || destroyed) return
+  if (audioStarted || audioStarting || !chimeAudio || destroyed || !props.active) return
   audioStarting = true
   try {
     await chimeAudio.play()
@@ -293,7 +302,7 @@ async function tryStartAudio() {
 }
 
 function playAnnouncement() {
-  if (!announcementAudio || destroyed) return
+  if (!announcementAudio || destroyed || !props.active) return
   announcementAudio.currentTime = 0
   typedSubtitle.value = ''
   showScrollPrompt.value = false
@@ -307,7 +316,7 @@ function playAnnouncement() {
 }
 
 function resumeAnnouncement() {
-  if (!announcementAudio || destroyed) return
+  if (!announcementAudio || destroyed || !props.active) return
   void announcementAudio.play().then(() => {
     announcementPlaying.value = true
     audioPrompt.value = ''
@@ -397,8 +406,31 @@ async function initialiseScene() {
   previousFrameTime = performance.now()
   render(performance.now())
   emit('ready')
-  setupAudioSequence()
+  if (props.active) setupAudioSequence()
 }
+
+watch(() => props.active, active => {
+  if (active) {
+    setupAudioSequence()
+    return
+  }
+
+  chimeAudio?.pause()
+  announcementAudio?.pause()
+  if (chimeAudio) chimeAudio.currentTime = 0
+  if (announcementAudio) announcementAudio.currentTime = 0
+  audioStarted = false
+  audioStarting = false
+  announcementPlaying.value = false
+  showScrollPrompt.value = false
+  typedSubtitle.value = ''
+  audioPrompt.value = ''
+  scrollUnlockEmitted = false
+  if (subtitleClearTimeout) {
+    clearTimeout(subtitleClearTimeout)
+    subtitleClearTimeout = null
+  }
+})
 
 function resizeCanvas() {
   const canvas = sceneCanvas.value
@@ -668,6 +700,7 @@ onUnmounted(() => {
   flyingClouds = []
   chimeAudio = null
   announcementAudio = null
+  audioPrepared = false
   if (subtitleClearTimeout) clearTimeout(subtitleClearTimeout)
 })
 </script>
