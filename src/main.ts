@@ -3,10 +3,11 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import './style.css'
 import App from './App.vue'
 import HomeView from './views/HomeView.vue'
-import ShowcaseView from './views/ShowcaseView.vue'
-import VibeView from './views/VibeView.vue'
-import CabinTestView from './views/CabinTestView.vue'
-import ScratchTransitionTestView from './views/ScratchTransitionTestView.vue'
+
+const ShowcaseView = () => import('./views/ShowcaseView.vue')
+const VibeView = () => import('./views/VibeView.vue')
+const CabinTestView = () => import('./views/CabinTestView.vue')
+const IronhillTestView = () => import('./views/IronhillTestView.vue')
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -15,7 +16,7 @@ const router = createRouter({
     { path: '/showcase',  component: ShowcaseView, name: 'showcase' },
     { path: '/vibe',      component: VibeView,     name: 'vibe' },
     { path: '/cabin-test', component: CabinTestView, name: 'cabin-test' },
-    { path: '/transition-test', component: ScratchTransitionTestView, name: 'transition-test' },
+    { path: '/transition-test', component: IronhillTestView, name: 'transition-test' },
   ],
 })
 

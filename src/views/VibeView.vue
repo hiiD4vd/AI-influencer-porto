@@ -44,39 +44,12 @@
       :class="{ 'is-active': showWelcome }"
       :aria-hidden="!showWelcome"
     >
-      <div ref="welcomePov" class="welcome-pov">
-        <video
-          ref="welcomeVideo"
-          class="welcome-video"
-          src="/videos/video welcome gym.mp4"
-          preload="auto"
-          poster="/frames/hero/frame_0259.jpg"
-          loop
-          muted
-          playsinline
-          webkit-playsinline
-        ></video>
-      </div>
-
-      <div class="welcome-subtitle" aria-live="polite">
-        {{ typedSubtitle }}
-        <span v-if="gymAudioPrompt" class="gym-audio-prompt">{{ gymAudioPrompt }}</span>
-      </div>
-    </section>
-
-    <section
-      v-show="cabinBridgeActive"
-      ref="cabinBridgeScene"
-      class="cabin-bridge-scene"
-      aria-label="Airplane cabin wall"
-      :aria-hidden="!cabinBridgeActive"
-    >
-      <img
-        class="cabin-bridge-image"
-        src="/images/background kabin.png"
-        alt="Airplane cabin wall"
-        draggable="false"
-      />
+      <canvas ref="gymSequenceCanvas" class="gym-sequence-canvas" aria-hidden="true"></canvas>
+      <canvas
+        ref="gymCabinFluidCanvas"
+        class="gym-cabin-fluid-canvas"
+        aria-label="Transisi cair dari ruang gym menuju kabin pesawat"
+      ></canvas>
     </section>
 
     <!-- Carousel scene — mounts on top of canvas, card starts at EXACT canvas position -->
@@ -87,13 +60,25 @@
       aria-hidden="true"
     ></canvas>
 
+    <canvas
+      v-show="cabinFishermanFluidActive"
+      ref="cabinFishermanFluidCanvas"
+      class="cabin-fisherman-fluid-canvas"
+      aria-label="Transisi cair dari kabin pesawat menuju profesi extreme fisherman"
+    ></canvas>
+
     <WingsuitFlightSection :progress="wingsuitSectionProgress" />
 
-    <section v-if="showCabinScene" ref="embeddedCabinScene" class="embedded-cabin-scene">
+    <section
+      ref="embeddedCabinScene"
+      class="embedded-cabin-scene"
+      :class="{ 'is-interactive': cabinSceneActive }"
+      :aria-hidden="!showCabinScene"
+    >
       <CabinTestView
         embedded
         :active="cabinSceneActive"
-        :paused="fishermanTransitionProgress > 0"
+        :paused="!showCabinScene || fishermanTransitionProgress > 0"
         :chime-audio-element="preparedCabinChime"
         :announcement-audio-element="preparedCabinAnnouncement"
         @ready="handleEmbeddedCabinReady"
@@ -166,6 +151,7 @@
 import { ref, shallowRef, onMounted, onUnmounted } from 'vue'
 import Lenis from 'lenis'
 import gsap from 'gsap'
+import * as THREE from 'three'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import CabinTestView from './CabinTestView.vue'
 import ScratchTransitionTestView from './ScratchTransitionTestView.vue'
@@ -199,6 +185,14 @@ const FRAME_PATH = (i: number) => `/frames/hero/frame_${String(i).padStart(4, '0
 const REDBULL_TOTAL_FRAMES = 224
 const REDBULL_SCROLL_PX_PER_FRAME = 12
 const REDBULL_FRAME_PATH = (i: number) => `/frames/redbull/frame_${String(i).padStart(4, '0')}.webp`
+const GYM_TOTAL_FRAMES = 97
+const GYM_SCROLL_PX_PER_FRAME = 12
+const GYM_SEQUENCE_VERSION = 'new-gym-sequence-20260723'
+const GYM_FRAME_PATH = (i: number) => `/frames/gym-sequence/frame_${String(i).padStart(4, '0')}.webp?v=${GYM_SEQUENCE_VERSION}`
+const FISHERMAN_TOTAL_FRAMES = 97
+const FISHERMAN_SCROLL_PX_PER_FRAME = 12
+const FISHERMAN_SEQUENCE_START = 0.58
+const FISHERMAN_FRAME_PATH = (i: number) => `/frames/fisherman-sequence/frame_${String(i).padStart(4, '0')}.webp`
 
 const LAST_FRAME_PNG = { w: 1920, h: 1080 }
 const CARD_IN_PNG = {
@@ -224,18 +218,17 @@ const parallaxContainer = ref<HTMLElement | null>(null)
 const cardEls        = ref<HTMLElement[]>([])
 const isLoading      = ref(true)
 const loadProgress   = ref(0)
-const welcomeVideo   = ref<HTMLVideoElement | null>(null)
 const welcomeScene   = ref<HTMLElement | null>(null)
-const welcomePov     = ref<HTMLElement | null>(null)
+const gymSequenceCanvas = ref<HTMLCanvasElement | null>(null)
+const gymCabinFluidCanvas = ref<HTMLCanvasElement | null>(null)
 const showWelcome    = ref(false)
-const typedSubtitle  = ref('')
-const gymAudioPrompt = ref('')
 const cabinTransitionCanvas = ref<HTMLCanvasElement | null>(null)
 const cabinTransitionActive = ref(false)
-const cabinBridgeScene = ref<HTMLElement | null>(null)
-const cabinBridgeActive = ref(false)
+const cabinFishermanFluidCanvas = ref<HTMLCanvasElement | null>(null)
+const cabinFishermanFluidActive = ref(false)
 const cabinSceneActive = ref(false)
 const showCabinScene = ref(false)
+const cabinSceneReady = ref(false)
 const embeddedCabinScene = ref<HTMLElement | null>(null)
 const cabinScrollUnlocked = ref(false)
 const cabinScrollLocked = ref(false)
@@ -245,10 +238,6 @@ const fluidHeroActive = ref(true)
 const introTransitionMarker = ref<HTMLElement | null>(null)
 const preparedCabinChime = shallowRef<HTMLAudioElement | null>(null)
 const preparedCabinAnnouncement = shallowRef<HTMLAudioElement | null>(null)
-
-const WELCOME_SUBTITLE = 'Welcome to Kevin.AI.\nYou’re now in athlete mode.'
-const WELCOME_SUBTITLE_START = 0.35
-const WELCOME_SUBTITLE_END_PADDING = 0.45
 
 // ── Idle Animation State ──────────────────────────────────────────────────
 let idleTimeout: any = null
@@ -274,24 +263,12 @@ const activeCardIndex = ref(0)
 const sliderProxy = { index: 0 }
 let currentZoomP     = 0
 let rafId            = 0
-let subtitleRafId    = 0
-let povRafId         = 0
-let welcomeAudioUnlocked = false
-let welcomeAudioPriming = false
-let welcomeStarting = false
-let povTargetX = 0
-let povTargetY = 0
-let povCurrentX = 0
-let povCurrentY = 0
-let povLastInteraction = 0
-let povDragging = false
-let povDragStartX = 0
-let povDragStartY = 0
-let povDragOriginX = 0
-let povDragOriginY = 0
 let cabinTransitionProgress = 0
-let cabinTransitionImage: HTMLImageElement | null = null
-let fishermanImage: HTMLImageElement | null = null
+let cabinTransitionImage: HTMLCanvasElement | null = null
+const gymFrames: Array<HTMLImageElement | undefined> = new Array(GYM_TOTAL_FRAMES)
+const gymFramePromises = new Map<number, Promise<HTMLImageElement | null>>()
+const fishermanFrames: Array<HTMLImageElement | undefined> = new Array(FISHERMAN_TOTAL_FRAMES)
+const fishermanFramePromises = new Map<number, Promise<HTMLImageElement | null>>()
 const redbullFrames: Array<HTMLImageElement | undefined> = new Array(REDBULL_TOTAL_FRAMES)
 const redbullFramePromises = new Map<number, Promise<HTMLImageElement | null>>()
 let frozenCabinFrame: HTMLCanvasElement | null = null
@@ -300,96 +277,190 @@ let storyScrollStart = 0
 let transitionSequenceStart = 0
 let transitionSequenceDistance = 1
 let heroScrollEnd = 0
+let gymScrollDistance = 0
+let gymSequenceProgress = 0
 let cabinScrollDistance = 0
 let fishermanScrollDistance = 0
 let fishermanTransitionProgress = 0
 let redbullScrollDistance = 0
 let redbullSequenceProgress = 0
 let wingsuitScrollDistance = 0
+let gymPreloadCancelled = false
+let fishermanPreloadCancelled = false
 let redbullPreloadCancelled = false
-let previousWelcomeVideoTime = 0
-let gymPlaybackSession = 0
-let gymUnlockTimer: ReturnType<typeof setTimeout> | null = null
 let cabinAudioPrimed = false
 let cabinAudioPriming = false
 let cabinTransitionAssetPromise: Promise<boolean> | null = null
 
-const clampPov = (value: number) => Math.max(-1, Math.min(1, value))
+let gymCabinFluidRenderer: THREE.WebGLRenderer | null = null
+let gymCabinFluidScene: THREE.Scene | null = null
+let gymCabinFluidCamera: THREE.OrthographicCamera | null = null
+let gymCabinFluidGeometry: THREE.PlaneGeometry | null = null
+let gymCabinFluidMaterial: THREE.ShaderMaterial | null = null
+let gymCabinFluidMesh: THREE.Mesh | null = null
+let gymCabinFluidTexture: THREE.Texture | null = null
+let gymCabinRenderedMaskProgress = 0
+let gymCabinAnimationStartTime = 0
 
-function getPovTravel() {
-  const video = welcomeVideo.value
-  if (!video) return { x: 0, y: 0 }
-  return {
-    x: Math.max(0, (video.offsetWidth - window.innerWidth) / 2),
-    y: Math.max(0, (video.offsetHeight - window.innerHeight) / 2)
+let cabinFishermanFluidRenderer: THREE.WebGLRenderer | null = null
+let cabinFishermanFluidScene: THREE.Scene | null = null
+let cabinFishermanFluidCamera: THREE.OrthographicCamera | null = null
+let cabinFishermanFluidGeometry: THREE.PlaneGeometry | null = null
+let cabinFishermanFluidMaterial: THREE.ShaderMaterial | null = null
+let cabinFishermanFluidMesh: THREE.Mesh | null = null
+let cabinFishermanCabinTexture: THREE.CanvasTexture | null = null
+let cabinFishermanSequenceTexture: THREE.CanvasTexture | null = null
+let cabinFishermanCabinBuffer: HTMLCanvasElement | null = null
+let cabinFishermanSequenceBuffer: HTMLCanvasElement | null = null
+let cabinFishermanRenderedFrame = -1
+let cabinFishermanRenderedProgress = 0
+let cabinFishermanAnimationStartTime = 0
+
+const gymCabinVertexShader = /* glsl */ `
+  varying vec2 vUv;
+
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
-}
+`
 
-function handleWelcomePovMove(event: PointerEvent) {
-  if (!showWelcome.value || cabinTransitionActive.value) return
+const gymCabinFragmentShader = /* glsl */ `
+  uniform sampler2D uCabinTexture;
+  uniform float uProgress;
+  uniform vec2 uResolution;
+  uniform vec2 uCabinImageResolution;
+  uniform float uSpread;
+  uniform float uParallaxOffset;
+  uniform float uTime;
+  varying vec2 vUv;
 
-  const now = performance.now()
-  if (povDragging && event.pointerType === 'touch') {
-    const travel = getPovTravel()
-    povTargetX = clampPov(povDragOriginX + (event.clientX - povDragStartX) / Math.max(1, travel.x))
-    povTargetY = clampPov(povDragOriginY + (event.clientY - povDragStartY) / Math.max(1, travel.y))
-    povLastInteraction = now
-    return
-  }
-
-  if (event.pointerType !== 'touch') {
-    povTargetX = clampPov(-((event.clientX / window.innerWidth) * 2 - 1))
-    povTargetY = clampPov(-((event.clientY / window.innerHeight) * 2 - 1))
-    povLastInteraction = now
-  }
-}
-
-function handleWelcomePovDown(event: PointerEvent) {
-  if (!showWelcome.value || cabinTransitionActive.value || event.pointerType !== 'touch') return
-  povDragging = true
-  povDragStartX = event.clientX
-  povDragStartY = event.clientY
-  povDragOriginX = povTargetX
-  povDragOriginY = povTargetY
-  povLastInteraction = performance.now()
-  welcomeScene.value?.setPointerCapture?.(event.pointerId)
-}
-
-function handleWelcomePovUp(event: PointerEvent) {
-  if (event.pointerType !== 'touch') return
-  povDragging = false
-  povLastInteraction = performance.now()
-  if (welcomeScene.value?.hasPointerCapture?.(event.pointerId)) {
-    welcomeScene.value.releasePointerCapture(event.pointerId)
-  }
-}
-
-function updateWelcomePov(time: number) {
-  povRafId = requestAnimationFrame(updateWelcomePov)
-  if (!showWelcome.value || cabinTransitionActive.value || !welcomePov.value) return
-
-  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  const idle = !povDragging && time - povLastInteraction > 1800
-  if (idle && !reducedMotion) {
-    // Layered waves produce an organic path: left, up, right, down, rather
-    // than a flat horizontal sweep.
-    // Idle motion stays close to center so the athlete never leaves frame.
-    // Manual drag and cursor movement still retain the full -1..1 range.
-    povTargetX = Math.sin(time * 0.00022) * 0.18
-    povTargetY = clampPov(
-      Math.sin(time * 0.00031 + 0.8) * 0.34 +
-      Math.sin(time * 0.00013 - 0.4) * 0.12
-    )
+  float hash(vec2 point) {
+    vec3 point3 = vec3(point.xy, 1.0);
+    return fract(sin(dot(point3, vec3(37.1, 61.7, 12.4))) * 3758.5453123);
   }
 
-  povCurrentX += (povTargetX - povCurrentX) * 0.055
-  povCurrentY += (povTargetY - povCurrentY) * 0.055
-  const travel = getPovTravel()
-  gsap.set(welcomePov.value, {
-    x: povCurrentX * travel.x,
-    y: povCurrentY * travel.y
-  })
-}
+  float noise(vec2 point) {
+    vec2 cell = floor(point);
+    vec2 local = fract(point);
+    local *= local * (3.0 - 2.0 * local);
+
+    return mix(
+      mix(hash(cell), hash(cell + vec2(1.0, 0.0)), local.x),
+      mix(hash(cell + vec2(0.0, 1.0)), hash(cell + vec2(1.0, 1.0)), local.x),
+      local.y
+    );
+  }
+
+  float fbm(vec2 point) {
+    float value = 0.0;
+    value += noise(point) * 0.5;
+    value += noise(point * 2.0) * 0.25;
+    value += noise(point * 4.0) * 0.125;
+    return value;
+  }
+
+  vec2 coverUv(vec2 uv, vec2 viewportSize, vec2 imageSize) {
+    float viewportAspect = viewportSize.x / viewportSize.y;
+    float imageAspect = imageSize.x / imageSize.y;
+    vec2 scale = vec2(
+      min(viewportAspect / imageAspect, 1.0),
+      min(imageAspect / viewportAspect, 1.0)
+    );
+    return uv * scale + (1.0 - scale) * 0.5;
+  }
+
+  void main() {
+    vec2 cabinUv = coverUv(vUv, uResolution, uCabinImageResolution);
+    cabinUv.y = 0.5 + (cabinUv.y - 0.5) * 0.9;
+    cabinUv.y += uParallaxOffset;
+    vec4 cabin = texture2D(uCabinTexture, cabinUv);
+
+    float aspect = uResolution.x / uResolution.y;
+    vec2 centeredUv = (vUv - 0.5) * vec2(aspect, 1.0);
+    float dissolveEdge = vUv.y - uProgress * 1.2;
+    vec2 noiseUv = centeredUv * 15.0;
+    float liquidTime = uTime * 0.105;
+    vec2 liquidWarp = vec2(
+      noise(noiseUv * 0.23 + vec2(liquidTime, -liquidTime * 0.4)),
+      noise(noiseUv * 0.23 + vec2(-liquidTime * 0.35, liquidTime * 0.75))
+    ) - 0.5;
+    float noiseValue = fbm(
+      noiseUv
+      + liquidWarp * 1.35
+      + vec2(liquidTime * 0.65, -liquidTime * 0.28)
+    );
+    float distanceToFront = dissolveEdge + noiseValue * uSpread;
+    float pixelSize = 1.0 / max(uResolution.y, 1.0);
+    float alpha = 1.0 - smoothstep(-pixelSize, pixelSize, distanceToFront);
+
+    gl_FragColor = vec4(cabin.rgb, cabin.a * alpha);
+  }
+`
+
+// The same living-noise vocabulary as Gym -> Cabin, but used as an outgoing
+// mask: the lower edge of the cabin erodes upward and reveals Fisherman below.
+const cabinFishermanFragmentShader = /* glsl */ `
+  uniform sampler2D uCabinTexture;
+  uniform sampler2D uFishermanTexture;
+  uniform float uProgress;
+  uniform float uSpread;
+  uniform float uTime;
+  uniform vec2 uResolution;
+  varying vec2 vUv;
+
+  float hash(vec2 point) {
+    vec3 point3 = vec3(point.xy, 1.0);
+    return fract(sin(dot(point3, vec3(37.1, 61.7, 12.4))) * 3758.5453123);
+  }
+
+  float noise(vec2 point) {
+    vec2 cell = floor(point);
+    vec2 local = fract(point);
+    local *= local * (3.0 - 2.0 * local);
+    return mix(
+      mix(hash(cell), hash(cell + vec2(1.0, 0.0)), local.x),
+      mix(hash(cell + vec2(0.0, 1.0)), hash(cell + vec2(1.0, 1.0)), local.x),
+      local.y
+    );
+  }
+
+  float fbm(vec2 point) {
+    float value = 0.0;
+    value += noise(point) * 0.5;
+    value += noise(point * 2.0) * 0.25;
+    value += noise(point * 4.0) * 0.125;
+    return value;
+  }
+
+  void main() {
+    vec4 cabin = texture2D(uCabinTexture, vUv);
+    vec4 fisherman = texture2D(uFishermanTexture, vUv);
+
+    float aspect = uResolution.x / max(uResolution.y, 1.0);
+    vec2 centeredUv = (vUv - 0.5) * vec2(aspect, 1.0);
+    vec2 noiseUv = centeredUv * 15.0;
+    float liquidTime = uTime * 0.105;
+    vec2 liquidWarp = vec2(
+      noise(noiseUv * 0.23 + vec2(liquidTime, -liquidTime * 0.4)),
+      noise(noiseUv * 0.23 + vec2(-liquidTime * 0.35, liquidTime * 0.75))
+    ) - 0.5;
+    float noiseValue = fbm(
+      noiseUv
+      + liquidWarp * 1.35
+      + vec2(liquidTime * 0.65, -liquidTime * 0.28)
+    );
+
+    // At zero the front is below the viewport. As progress grows it travels
+    // upward, leaving irregular living islands of the cabin along its edge.
+    float revealFront = -0.34 + uProgress * 1.68;
+    float distanceToFront = vUv.y + (noiseValue - 0.5) * uSpread - revealFront;
+    float pixelSize = 1.0 / max(uResolution.y, 1.0);
+    float cabinAlpha = smoothstep(-pixelSize, pixelSize, distanceToFront);
+
+    gl_FragColor = mix(fisherman, cabin, cabinAlpha);
+  }
+`
 
 function nextCard() {
   if (activeCardIndex.value < CARDS.length - 1) {
@@ -458,8 +529,9 @@ function drawFrame(index: number) {
 }
 
 // ── Render loop ───────────────────────────────────────────────────────────
-function tick() {
+function tick(time = performance.now()) {
   rafId = requestAnimationFrame(tick)
+  lenis?.raf(time)
   if (targetFrame < TOTAL_FRAMES - 1) {
     currentFrame += (targetFrame - currentFrame) * 0.12
     drawFrame(Math.round(currentFrame))
@@ -467,12 +539,8 @@ function tick() {
     currentFrame += (targetFrame - currentFrame) * 0.12
     drawFrame(Math.round(currentFrame))
   }
-
-  if (targetFrame >= TOTAL_FRAMES - 1 && currentFrame >= TOTAL_FRAMES - 1.1) {
-    if (!showCabinScene.value) void startWelcomeScene()
-  } else if (targetFrame < TOTAL_FRAMES - 5) {
-    stopWelcomeScene()
-  }
+  renderGymCabinFluid(time)
+  renderCabinFishermanFluid(time)
 }
 
 // ── Zoom logic based on progress ──────────────────────────────────────────
@@ -689,191 +757,6 @@ async function primeCabinAudio() {
   if (cabinAudioPrimed) removeCabinAudioPrimeListeners()
 }
 
-function stopGymMedia() {
-  gymPlaybackSession += 1
-  if (gymUnlockTimer) {
-    clearTimeout(gymUnlockTimer)
-    gymUnlockTimer = null
-  }
-  const video = welcomeVideo.value
-  if (!video) return
-  video.pause()
-  video.muted = true
-  video.volume = 1
-}
-
-function scheduleCabinUnlock(video: HTMLVideoElement) {
-  if (gymUnlockTimer) clearTimeout(gymUnlockTimer)
-  const duration = Number.isFinite(video.duration) && video.duration > 0
-    ? video.duration
-    : 8.2
-  gymUnlockTimer = window.setTimeout(() => {
-    gymUnlockTimer = null
-    if (showWelcome.value && !showCabinScene.value) unlockCabinScroll()
-  }, duration * 1000 + 180)
-}
-
-async function primeWelcomeAudio() {
-  const video = welcomeVideo.value
-  if (
-    !video ||
-    welcomeAudioUnlocked ||
-    welcomeAudioPriming ||
-    showCabinScene.value ||
-    cabinTransitionProgress > 0.0001
-  ) return
-
-  welcomeAudioPriming = true
-  const playbackSession = gymPlaybackSession
-
-  video.muted = false
-  video.volume = 0.001
-
-  try {
-    await video.play()
-    if (playbackSession !== gymPlaybackSession) {
-      if (
-        showWelcome.value &&
-        !showCabinScene.value &&
-        cabinTransitionProgress <= 0.0001
-      ) {
-        welcomeAudioUnlocked = true
-        gymAudioPrompt.value = ''
-        video.volume = 1
-        video.muted = false
-        window.removeEventListener('pointerdown', primeWelcomeAudio)
-        window.removeEventListener('touchstart', primeWelcomeAudio)
-        window.removeEventListener('wheel', primeWelcomeAudio)
-        window.removeEventListener('keydown', primeWelcomeAudio)
-      }
-      return
-    }
-    if (cabinTransitionProgress > 0.0001 || showCabinScene.value) {
-      video.pause()
-      video.muted = true
-      return
-    }
-    welcomeAudioUnlocked = true
-    gymAudioPrompt.value = ''
-    window.removeEventListener('pointerdown', primeWelcomeAudio)
-    window.removeEventListener('touchstart', primeWelcomeAudio)
-    window.removeEventListener('wheel', primeWelcomeAudio)
-    window.removeEventListener('keydown', primeWelcomeAudio)
-
-    if (!showWelcome.value) video.volume = 0.001
-  } catch {
-    if (playbackSession !== gymPlaybackSession) return
-    video.muted = true
-  } finally {
-    if (playbackSession === gymPlaybackSession && showWelcome.value) video.volume = 1
-    welcomeAudioPriming = false
-  }
-}
-
-async function startWelcomeScene() {
-  if (showWelcome.value || welcomeStarting || showCabinScene.value) return
-  welcomeStarting = true
-  const playbackSession = ++gymPlaybackSession
-
-  const video = welcomeVideo.value
-  typedSubtitle.value = ''
-  void preloadCabinTransitionAsset()
-  if (!video) {
-    welcomeStarting = false
-    return
-  }
-
-  // Make the scene visible before calling play. Mobile Safari may reject
-  // playback when the video or one of its parents is still hidden.
-  povTargetX = 0
-  povTargetY = 0
-  povCurrentX = 0
-  povCurrentY = 0
-  povLastInteraction = performance.now()
-  showWelcome.value = true
-  if (canvasEl.value) canvasEl.value.style.visibility = 'hidden'
-
-  video.currentTime = 0
-  previousWelcomeVideoTime = 0
-  video.muted = true
-  video.volume = 1
-  scheduleCabinUnlock(video)
-
-  try {
-    await video.play()
-    if (playbackSession !== gymPlaybackSession || showCabinScene.value) {
-      video.pause()
-      video.muted = true
-      welcomeStarting = false
-      return
-    }
-    if (welcomeAudioUnlocked) {
-      video.muted = false
-      gymAudioPrompt.value = ''
-      window.removeEventListener('pointerdown', primeWelcomeAudio)
-      window.removeEventListener('touchstart', primeWelcomeAudio)
-      window.removeEventListener('wheel', primeWelcomeAudio)
-      window.removeEventListener('keydown', primeWelcomeAudio)
-    }
-    scheduleCabinUnlock(video)
-  } catch {
-    if (playbackSession !== gymPlaybackSession) {
-      welcomeStarting = false
-      return
-    }
-    video.muted = true
-    await video.play().catch(() => undefined)
-    if (!video.paused) scheduleCabinUnlock(video)
-    if (playbackSession !== gymPlaybackSession || showCabinScene.value) {
-      video.pause()
-      video.muted = true
-    }
-  }
-
-  welcomeStarting = false
-}
-
-function stopWelcomeScene() {
-  welcomeStarting = false
-  if (!showWelcome.value) return
-
-  showWelcome.value = false
-  typedSubtitle.value = ''
-
-  const video = welcomeVideo.value
-  if (video) {
-    stopGymMedia()
-    video.currentTime = 0
-  }
-
-  if (welcomePov.value) {
-    gsap.set(welcomePov.value, { x: 0, y: 0 })
-  }
-  povTargetX = 0
-  povTargetY = 0
-  povCurrentX = 0
-  povCurrentY = 0
-  povDragging = false
-
-  if (canvasEl.value) canvasEl.value.style.visibility = 'visible'
-}
-
-function updateWelcomeSubtitle() {
-  subtitleRafId = requestAnimationFrame(updateWelcomeSubtitle)
-  const video = welcomeVideo.value
-  if (!showWelcome.value || !video) return
-  if (cabinTransitionProgress > 0.0001) {
-    typedSubtitle.value = ''
-    return
-  }
-
-  const duration = Number.isFinite(video.duration) ? video.duration : 8.04
-  const end = Math.max(WELCOME_SUBTITLE_START + 0.5, duration - WELCOME_SUBTITLE_END_PADDING)
-  const progress = Math.max(0, Math.min(1, (video.currentTime - WELCOME_SUBTITLE_START) / (end - WELCOME_SUBTITLE_START)))
-  const characterCount = Math.floor(progress * WELCOME_SUBTITLE.length)
-  typedSubtitle.value = WELCOME_SUBTITLE.slice(0, characterCount)
-}
-
 function preloadFrames(): Promise<void> {
   return new Promise(resolve => {
     let loaded = 0
@@ -888,6 +771,108 @@ function preloadFrames(): Promise<void> {
       images[i - 1] = img
     }
   })
+}
+
+function findNearestLoadedFrame(
+  frames: Array<HTMLImageElement | undefined>,
+  targetIndex: number,
+): HTMLImageElement | undefined {
+  const exact = frames[targetIndex]
+  if (exact?.complete && exact.naturalWidth) return exact
+
+  for (let offset = 1; offset < frames.length; offset++) {
+    const before = frames[targetIndex - offset]
+    const after = frames[targetIndex + offset]
+    if (before?.complete && before.naturalWidth) return before
+    if (after?.complete && after.naturalWidth) return after
+  }
+  return undefined
+}
+
+function loadGymFrame(index: number): Promise<HTMLImageElement | null> {
+  const safeIndex = Math.max(0, Math.min(GYM_TOTAL_FRAMES - 1, index))
+  const cached = gymFrames[safeIndex]
+  if (cached?.complete && cached.naturalWidth) return Promise.resolve(cached)
+  const pending = gymFramePromises.get(safeIndex)
+  if (pending) return pending
+
+  const request = new Promise<HTMLImageElement | null>(resolve => {
+    const image = new Image()
+    image.decoding = 'async'
+    image.onload = () => {
+      gymFrames[safeIndex] = image
+      gymFramePromises.delete(safeIndex)
+      if (showWelcome.value) renderGymSequence(gymSequenceProgress)
+      resolve(image)
+    }
+    image.onerror = () => {
+      gymFramePromises.delete(safeIndex)
+      resolve(null)
+    }
+    image.src = GYM_FRAME_PATH(safeIndex + 1)
+  })
+
+  gymFramePromises.set(safeIndex, request)
+  return request
+}
+
+function loadFishermanFrame(index: number): Promise<HTMLImageElement | null> {
+  const safeIndex = Math.max(0, Math.min(FISHERMAN_TOTAL_FRAMES - 1, index))
+  const cached = fishermanFrames[safeIndex]
+  if (cached?.complete && cached.naturalWidth) return Promise.resolve(cached)
+  const pending = fishermanFramePromises.get(safeIndex)
+  if (pending) return pending
+
+  const request = new Promise<HTMLImageElement | null>(resolve => {
+    const image = new Image()
+    image.decoding = 'async'
+    image.onload = () => {
+      fishermanFrames[safeIndex] = image
+      fishermanFramePromises.delete(safeIndex)
+      if (fishermanTransitionProgress > 0) {
+        renderFishermanTransition(fishermanTransitionProgress)
+      }
+      resolve(image)
+    }
+    image.onerror = () => {
+      fishermanFramePromises.delete(safeIndex)
+      resolve(null)
+    }
+    image.src = FISHERMAN_FRAME_PATH(safeIndex + 1)
+  })
+
+  fishermanFramePromises.set(safeIndex, request)
+  return request
+}
+
+async function preloadSequenceFrames(
+  totalFrames: number,
+  loader: (index: number) => Promise<HTMLImageElement | null>,
+  isCancelled: () => boolean,
+) {
+  let nextIndex = 1
+  const worker = async () => {
+    while (!isCancelled() && nextIndex < totalFrames) {
+      await loader(nextIndex++)
+    }
+  }
+  await Promise.all(Array.from({ length: 4 }, worker))
+}
+
+async function preloadGymFrames() {
+  gymPreloadCancelled = false
+  await loadGymFrame(0)
+  await preloadSequenceFrames(GYM_TOTAL_FRAMES, loadGymFrame, () => gymPreloadCancelled)
+}
+
+async function preloadFishermanFrames() {
+  fishermanPreloadCancelled = false
+  await loadFishermanFrame(0)
+  await preloadSequenceFrames(
+    FISHERMAN_TOTAL_FRAMES,
+    loadFishermanFrame,
+    () => fishermanPreloadCancelled,
+  )
 }
 
 function loadRedbullFrame(index: number): Promise<HTMLImageElement | null> {
@@ -933,12 +918,371 @@ async function preloadRedbullFrames() {
   await Promise.all(Array.from({ length: 6 }, worker))
 }
 
+function drawImageCover(
+  context: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  width: number,
+  height: number,
+  zoom = 1,
+) {
+  const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight) * zoom
+  const drawWidth = image.naturalWidth * scale
+  const drawHeight = image.naturalHeight * scale
+  context.clearRect(0, 0, width, height)
+  context.drawImage(
+    image,
+    (width - drawWidth) / 2,
+    (height - drawHeight) / 2,
+    drawWidth,
+    drawHeight,
+  )
+}
+
+function renderGymSequence(progress: number) {
+  const canvas = gymSequenceCanvas.value
+  if (!canvas) return
+  const context = canvas.getContext('2d')
+  if (!context) return
+
+  if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+    canvas.width = window.innerWidth
+    canvas.height = window.innerHeight
+  }
+
+  const frameIndex = Math.round(clamp01(progress) * (GYM_TOTAL_FRAMES - 1))
+  const exactFrame = gymFrames[frameIndex]
+  if (!exactFrame?.complete || !exactFrame.naturalWidth) void loadGymFrame(frameIndex)
+  const image = findNearestLoadedFrame(gymFrames, frameIndex)
+  if (!image) return
+  drawImageCover(context, image, canvas.width, canvas.height)
+}
+
+async function initGymCabinFluid(): Promise<boolean> {
+  const canvas = gymCabinFluidCanvas.value
+  if (!canvas) return false
+
+  try {
+    gymCabinFluidScene = new THREE.Scene()
+    gymCabinFluidCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10)
+    gymCabinFluidCamera.position.z = 1
+    gymCabinFluidRenderer = new THREE.WebGLRenderer({
+      canvas,
+      alpha: true,
+      antialias: false,
+      powerPreference: 'high-performance',
+    })
+    gymCabinFluidRenderer.outputColorSpace = THREE.SRGBColorSpace
+
+    const sourceTexture = await new THREE.TextureLoader().loadAsync('/images/kabin dan jendela.png')
+    const sourceImage = sourceTexture.image as HTMLImageElement
+    const maxDimension = 4096
+    const sourceWidth = sourceImage.naturalWidth || sourceImage.width
+    const sourceHeight = sourceImage.naturalHeight || sourceImage.height
+    // The lower 3762x1758 region is the windowed cabin. Sampling only the
+    // upper region gives the dissolve its plain wall while keeping both
+    // scenes sourced from the exact same exported texture.
+    const windowSectionAspect = 3762 / 1758
+    const windowSectionHeight = Math.min(sourceHeight, sourceWidth / windowSectionAspect)
+    const plainSectionHeight = Math.max(1, sourceHeight - windowSectionHeight)
+    const sourceScale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight))
+    const preparedSource = document.createElement('canvas')
+    preparedSource.width = Math.max(1, Math.round(sourceWidth * sourceScale))
+    preparedSource.height = Math.max(1, Math.round(plainSectionHeight * sourceScale))
+    const preparedContext = preparedSource.getContext('2d')
+    if (!preparedContext) throw new Error('Could not prepare cabin transition texture')
+    preparedContext.imageSmoothingEnabled = true
+    preparedContext.imageSmoothingQuality = 'high'
+    preparedContext.drawImage(
+      sourceImage,
+      0,
+      0,
+      sourceWidth,
+      plainSectionHeight,
+      0,
+      0,
+      preparedSource.width,
+      preparedSource.height,
+    )
+    sourceTexture.dispose()
+
+    // Match CabinTestView's high-quality 4096px Canvas2D preparation before
+    // handing the image to WebGL. The dissolve shader itself stays unchanged.
+    gymCabinFluidTexture = new THREE.CanvasTexture(preparedSource)
+    gymCabinFluidTexture.colorSpace = THREE.SRGBColorSpace
+    gymCabinFluidTexture.minFilter = THREE.LinearMipmapLinearFilter
+    gymCabinFluidTexture.magFilter = THREE.LinearFilter
+    gymCabinFluidTexture.generateMipmaps = true
+    gymCabinFluidTexture.anisotropy = gymCabinFluidRenderer.capabilities.getMaxAnisotropy()
+
+    gymCabinFluidGeometry = new THREE.PlaneGeometry(2, 2)
+    gymCabinFluidMaterial = new THREE.ShaderMaterial({
+      vertexShader: gymCabinVertexShader,
+      fragmentShader: gymCabinFragmentShader,
+      uniforms: {
+        uCabinTexture: { value: gymCabinFluidTexture },
+        uProgress: { value: 0 },
+        uResolution: { value: new THREE.Vector2(1, 1) },
+        uCabinImageResolution: {
+          value: new THREE.Vector2(
+            preparedSource.width,
+            preparedSource.height,
+          ),
+        },
+        uSpread: { value: 0.5 },
+        uParallaxOffset: { value: 0 },
+        uTime: { value: 0 },
+      },
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    })
+    gymCabinFluidMesh = new THREE.Mesh(gymCabinFluidGeometry, gymCabinFluidMaterial)
+    gymCabinFluidScene.add(gymCabinFluidMesh)
+    gymCabinAnimationStartTime = performance.now()
+    resizeGymCabinFluid()
+    return true
+  } catch {
+    disposeGymCabinFluid()
+    return false
+  }
+}
+
+function resizeGymCabinFluid() {
+  if (!gymCabinFluidRenderer || !gymCabinFluidMaterial || !welcomeScene.value) return
+  const width = Math.max(welcomeScene.value.clientWidth, 1)
+  const height = Math.max(welcomeScene.value.clientHeight, 1)
+  gymCabinFluidRenderer.setPixelRatio(getFluidPixelRatio())
+  gymCabinFluidRenderer.setSize(width, height, false)
+  gymCabinFluidMaterial.uniforms.uResolution.value.set(width, height)
+}
+
+function renderGymCabinFluid(time: number) {
+  if (
+    !showWelcome.value
+    || !gymCabinFluidRenderer
+    || !gymCabinFluidScene
+    || !gymCabinFluidCamera
+    || !gymCabinFluidMaterial
+  ) return
+
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const maskSmoothing = reducedMotion ? 1 : 0.055
+  gymCabinRenderedMaskProgress += (
+    gymSequenceProgress - gymCabinRenderedMaskProgress
+  ) * maskSmoothing
+  const transitionProgress = clamp01((gymCabinRenderedMaskProgress - 0.5) / 0.5)
+  const easedTransitionProgress = Math.pow(transitionProgress, 1.7)
+  gymCabinFluidMaterial.uniforms.uProgress.value = easedTransitionProgress * 1.2
+  gymCabinFluidMaterial.uniforms.uParallaxOffset.value = -0.045 * easedTransitionProgress
+  gymCabinFluidMaterial.uniforms.uTime.value = reducedMotion
+    ? 0
+    : (time - gymCabinAnimationStartTime) / 1000
+  gymCabinFluidRenderer.render(gymCabinFluidScene, gymCabinFluidCamera)
+}
+
+function disposeGymCabinFluid() {
+  if (gymCabinFluidMesh && gymCabinFluidScene) {
+    gymCabinFluidScene.remove(gymCabinFluidMesh)
+  }
+  gymCabinFluidTexture?.dispose()
+  gymCabinFluidGeometry?.dispose()
+  gymCabinFluidMaterial?.dispose()
+  gymCabinFluidRenderer?.dispose()
+  gymCabinFluidRenderer?.forceContextLoss()
+  gymCabinFluidScene?.clear()
+  gymCabinFluidRenderer = null
+  gymCabinFluidScene = null
+  gymCabinFluidCamera = null
+  gymCabinFluidGeometry = null
+  gymCabinFluidMaterial = null
+  gymCabinFluidMesh = null
+  gymCabinFluidTexture = null
+}
+
+function getFluidPixelRatio() {
+  const mobileCap = window.innerWidth < 768 ? 1.25 : 1.5
+  return Math.min(window.devicePixelRatio || 1, mobileCap)
+}
+
+function createViewportBuffer() {
+  const buffer = document.createElement('canvas')
+  buffer.width = Math.max(1, window.innerWidth)
+  buffer.height = Math.max(1, window.innerHeight)
+  return buffer
+}
+
+async function initCabinFishermanFluid(): Promise<boolean> {
+  const canvas = cabinFishermanFluidCanvas.value
+  if (!canvas) return false
+
+  try {
+    cabinFishermanFluidScene = new THREE.Scene()
+    cabinFishermanFluidCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10)
+    cabinFishermanFluidCamera.position.z = 1
+    cabinFishermanFluidRenderer = new THREE.WebGLRenderer({
+      canvas,
+      alpha: false,
+      antialias: false,
+      powerPreference: 'high-performance',
+    })
+    cabinFishermanFluidRenderer.outputColorSpace = THREE.SRGBColorSpace
+
+    cabinFishermanCabinBuffer = createViewportBuffer()
+    cabinFishermanSequenceBuffer = createViewportBuffer()
+    const cabinContext = cabinFishermanCabinBuffer.getContext('2d')
+    const fishermanContext = cabinFishermanSequenceBuffer.getContext('2d')
+    if (!cabinContext || !fishermanContext) throw new Error('Could not create transition buffers')
+    cabinContext.fillStyle = '#000'
+    cabinContext.fillRect(0, 0, cabinFishermanCabinBuffer.width, cabinFishermanCabinBuffer.height)
+    fishermanContext.fillStyle = '#000'
+    fishermanContext.fillRect(0, 0, cabinFishermanSequenceBuffer.width, cabinFishermanSequenceBuffer.height)
+
+    cabinFishermanCabinTexture = new THREE.CanvasTexture(cabinFishermanCabinBuffer)
+    cabinFishermanSequenceTexture = new THREE.CanvasTexture(cabinFishermanSequenceBuffer)
+    for (const texture of [cabinFishermanCabinTexture, cabinFishermanSequenceTexture]) {
+      texture.colorSpace = THREE.SRGBColorSpace
+      texture.minFilter = THREE.LinearFilter
+      texture.magFilter = THREE.LinearFilter
+      texture.generateMipmaps = false
+    }
+
+    cabinFishermanFluidGeometry = new THREE.PlaneGeometry(2, 2)
+    cabinFishermanFluidMaterial = new THREE.ShaderMaterial({
+      vertexShader: gymCabinVertexShader,
+      fragmentShader: cabinFishermanFragmentShader,
+      uniforms: {
+        uCabinTexture: { value: cabinFishermanCabinTexture },
+        uFishermanTexture: { value: cabinFishermanSequenceTexture },
+        uProgress: { value: 0 },
+        uSpread: { value: 0.5 },
+        uTime: { value: 0 },
+        uResolution: { value: new THREE.Vector2(1, 1) },
+      },
+      depthTest: false,
+      depthWrite: false,
+    })
+    cabinFishermanFluidMesh = new THREE.Mesh(
+      cabinFishermanFluidGeometry,
+      cabinFishermanFluidMaterial,
+    )
+    cabinFishermanFluidScene.add(cabinFishermanFluidMesh)
+    cabinFishermanAnimationStartTime = performance.now()
+    resizeCabinFishermanFluid()
+    return true
+  } catch {
+    disposeCabinFishermanFluid()
+    return false
+  }
+}
+
+function resizeCabinFishermanFluid() {
+  if (!cabinFishermanFluidRenderer || !cabinFishermanFluidMaterial) return
+  const width = Math.max(window.innerWidth, 1)
+  const height = Math.max(window.innerHeight, 1)
+  cabinFishermanFluidRenderer.setPixelRatio(getFluidPixelRatio())
+  cabinFishermanFluidRenderer.setSize(width, height, false)
+  cabinFishermanFluidMaterial.uniforms.uResolution.value.set(width, height)
+
+  for (const buffer of [cabinFishermanCabinBuffer, cabinFishermanSequenceBuffer]) {
+    if (!buffer || (buffer.width === width && buffer.height === height)) continue
+    buffer.width = width
+    buffer.height = height
+  }
+  cabinFishermanRenderedFrame = -1
+  if (frozenCabinFrame) updateCabinFishermanCabinTexture()
+}
+
+function updateCabinFishermanCabinTexture() {
+  if (!frozenCabinFrame || !cabinFishermanCabinBuffer || !cabinFishermanCabinTexture) return
+  const context = cabinFishermanCabinBuffer.getContext('2d')
+  if (!context) return
+  context.clearRect(0, 0, cabinFishermanCabinBuffer.width, cabinFishermanCabinBuffer.height)
+  context.drawImage(
+    frozenCabinFrame,
+    0,
+    0,
+    cabinFishermanCabinBuffer.width,
+    cabinFishermanCabinBuffer.height,
+  )
+  cabinFishermanCabinTexture.needsUpdate = true
+}
+
+function updateCabinFishermanSequenceTexture(frameIndex: number, image: HTMLImageElement) {
+  if (
+    frameIndex === cabinFishermanRenderedFrame
+    || !cabinFishermanSequenceBuffer
+    || !cabinFishermanSequenceTexture
+  ) return
+  const context = cabinFishermanSequenceBuffer.getContext('2d')
+  if (!context) return
+  drawImageCover(
+    context,
+    image,
+    cabinFishermanSequenceBuffer.width,
+    cabinFishermanSequenceBuffer.height,
+  )
+  cabinFishermanSequenceTexture.needsUpdate = true
+  cabinFishermanRenderedFrame = frameIndex
+}
+
+function renderCabinFishermanFluid(time: number) {
+  if (
+    !cabinFishermanFluidActive.value
+    || !cabinFishermanFluidRenderer
+    || !cabinFishermanFluidScene
+    || !cabinFishermanFluidCamera
+    || !cabinFishermanFluidMaterial
+  ) return
+
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const smoothing = reducedMotion ? 1 : 0.075
+  cabinFishermanRenderedProgress += (
+    fishermanTransitionProgress - cabinFishermanRenderedProgress
+  ) * smoothing
+  const dissolveProgress = smoothstep(
+    0,
+    FISHERMAN_SEQUENCE_START,
+    cabinFishermanRenderedProgress,
+  )
+  cabinFishermanFluidMaterial.uniforms.uProgress.value = dissolveProgress
+  cabinFishermanFluidMaterial.uniforms.uTime.value = reducedMotion
+    ? 0
+    : (time - cabinFishermanAnimationStartTime) / 1000
+  cabinFishermanFluidRenderer.render(cabinFishermanFluidScene, cabinFishermanFluidCamera)
+}
+
+function disposeCabinFishermanFluid() {
+  if (cabinFishermanFluidMesh && cabinFishermanFluidScene) {
+    cabinFishermanFluidScene.remove(cabinFishermanFluidMesh)
+  }
+  cabinFishermanCabinTexture?.dispose()
+  cabinFishermanSequenceTexture?.dispose()
+  cabinFishermanFluidGeometry?.dispose()
+  cabinFishermanFluidMaterial?.dispose()
+  cabinFishermanFluidRenderer?.dispose()
+  cabinFishermanFluidRenderer?.forceContextLoss()
+  cabinFishermanFluidScene?.clear()
+  cabinFishermanFluidRenderer = null
+  cabinFishermanFluidScene = null
+  cabinFishermanFluidCamera = null
+  cabinFishermanFluidGeometry = null
+  cabinFishermanFluidMaterial = null
+  cabinFishermanFluidMesh = null
+  cabinFishermanCabinTexture = null
+  cabinFishermanSequenceTexture = null
+  cabinFishermanCabinBuffer = null
+  cabinFishermanSequenceBuffer = null
+}
+
 // ── Resize ────────────────────────────────────────────────────────────────
 function resizeCanvas() {
   if (!canvasEl.value) return
   canvasEl.value.width  = window.innerWidth
   canvasEl.value.height = window.innerHeight
   drawFrame(Math.round(currentFrame))
+  renderGymSequence(gymSequenceProgress)
+  resizeGymCabinFluid()
+  resizeCabinFishermanFluid()
   if (cabinTransitionActive.value) {
     if (redbullSequenceProgress > 0.0001) {
       renderRedbullSequence(redbullSequenceProgress)
@@ -946,10 +1290,22 @@ function resizeCanvas() {
       renderFishermanTransition(fishermanTransitionProgress)
     }
   }
+  if (cabinFishermanFluidActive.value) {
+    renderFishermanTransition(fishermanTransitionProgress)
+  }
 
   updateCabinPanels(cabinTransitionProgress)
 
   if (baseStoryScrollHeight > 0) {
+    gymScrollDistance = GYM_TOTAL_FRAMES * GYM_SCROLL_PX_PER_FRAME
+    cabinScrollDistance = Math.max(1800, window.innerHeight * 2)
+    fishermanScrollDistance = Math.max(
+      Math.ceil(
+        (FISHERMAN_TOTAL_FRAMES * FISHERMAN_SCROLL_PX_PER_FRAME)
+        / (1 - FISHERMAN_SEQUENCE_START),
+      ),
+      window.innerHeight * 2.8,
+    )
     wingsuitScrollDistance = Math.max(1400, window.innerHeight * 1.8)
     updateStoryScrollHeight()
   }
@@ -969,131 +1325,55 @@ function preloadCabinTransitionAsset(): Promise<boolean> {
     const image = new Image()
     image.decoding = 'async'
     image.onload = () => {
-      cabinTransitionImage = image
+      const sourceWidth = image.naturalWidth
+      const sourceHeight = image.naturalHeight
+      const windowSectionAspect = 3762 / 1758
+      const cropHeight = Math.min(sourceHeight, sourceWidth / windowSectionAspect)
+      const cropY = sourceHeight - cropHeight
+      const buffer = document.createElement('canvas')
+      buffer.width = sourceWidth
+      buffer.height = Math.max(1, Math.round(cropHeight))
+      const bufferContext = buffer.getContext('2d')
+      if (!bufferContext) {
+        resolve(false)
+        return
+      }
+      bufferContext.imageSmoothingEnabled = true
+      bufferContext.imageSmoothingQuality = 'high'
+      bufferContext.drawImage(
+        image,
+        0,
+        cropY,
+        sourceWidth,
+        cropHeight,
+        0,
+        0,
+        buffer.width,
+        buffer.height,
+      )
+      cabinTransitionImage = buffer
       resolve(true)
     }
     image.onerror = () => resolve(false)
-    image.src = '/images/cabin-windows.png'
+    image.src = '/images/kabin dan jendela.png'
   })
-
-  if (!fishermanImage) {
-    const fisherman = new Image()
-    fisherman.decoding = 'async'
-    fisherman.onload = () => { fishermanImage = fisherman }
-    fisherman.src = '/images/fisherman.png'
-  }
 
   return cabinTransitionAssetPromise
 }
 
 function renderFishermanTransition(progress: number) {
-  const canvas = cabinTransitionCanvas.value
-  const cabin = cabinTransitionImage
-  const fisherman = fishermanImage
-  if (!canvas || !cabin || !fisherman) return
-  const context = canvas.getContext('2d')
-  if (!context) return
-
-  if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
-    canvas.width = window.innerWidth
-    canvas.height = window.innerHeight
-  }
-
-  const viewWidth = canvas.width
-  const viewHeight = canvas.height
-  const viewAspect = viewWidth / viewHeight
-  const imageWidth = cabin.naturalWidth
-  const imageHeight = cabin.naturalHeight
-  const imageAspect = imageWidth / imageHeight
-
-  const openingWidth = Math.min(
-    imageWidth * 0.098,
-    imageHeight * 0.285 * viewAspect
+  const sequenceProgress = clamp01(
+    (progress - FISHERMAN_SEQUENCE_START) / (1 - FISHERMAN_SEQUENCE_START),
   )
-  const openingHeight = openingWidth / viewAspect
-  const openingX = imageWidth * 0.505 - openingWidth / 2
-  const openingY = imageHeight * 0.5 - openingHeight / 2
-
-  const finalZoom = 1.34
-  let cabinWidth: number
-  let cabinHeight: number
-  if (imageAspect > viewAspect) {
-    cabinHeight = imageHeight / finalZoom
-    cabinWidth = cabinHeight * viewAspect
-  } else {
-    cabinWidth = imageWidth / finalZoom
-    cabinHeight = cabinWidth / viewAspect
+  const fishermanFrameIndex = Math.round(sequenceProgress * (FISHERMAN_TOTAL_FRAMES - 1))
+  const exactFishermanFrame = fishermanFrames[fishermanFrameIndex]
+  if (!exactFishermanFrame?.complete || !exactFishermanFrame.naturalWidth) {
+    void loadFishermanFrame(fishermanFrameIndex)
   }
-  const cabinX = (imageWidth - cabinWidth) / 2
-  const cabinY = (imageHeight - cabinHeight) / 2
-
-  const windowProgress = smoothstep(0, 0.61, progress)
-  const cropWidth = cabinWidth * Math.pow(openingWidth / cabinWidth, windowProgress)
-  const cropHeight = cabinHeight * Math.pow(openingHeight / cabinHeight, windowProgress)
-  const cabinCenterX = cabinX + cabinWidth / 2
-  const cabinCenterY = cabinY + cabinHeight / 2
-  const openingCenterX = openingX + openingWidth / 2
-  const openingCenterY = openingY + openingHeight / 2
-  const cropCenterX = cabinCenterX + (openingCenterX - cabinCenterX) * windowProgress
-  const cropCenterY = cabinCenterY + (openingCenterY - cabinCenterY) * windowProgress
-  const cropX = cropCenterX - cropWidth / 2
-  const cropY = cropCenterY - cropHeight / 2
-
-  const skyGradient = context.createLinearGradient(0, 0, 0, viewHeight)
-  skyGradient.addColorStop(0, '#49B2E7')
-  skyGradient.addColorStop(1, '#BDDAEC')
-  context.fillStyle = skyGradient
-  context.fillRect(0, 0, viewWidth, viewHeight)
-
-  const fishermanReveal = smoothstep(0.58, 0.9, progress)
-  if (fishermanReveal > 0) {
-    const fishermanZoom = 1 + smoothstep(0.62, 1, progress) * 0.1
-    const fishermanAspect = fisherman.naturalWidth / fisherman.naturalHeight
-    let sourceWidth: number
-    let sourceHeight: number
-    if (fishermanAspect > viewAspect) {
-      sourceHeight = fisherman.naturalHeight / fishermanZoom
-      sourceWidth = sourceHeight * viewAspect
-    } else {
-      sourceWidth = fisherman.naturalWidth / fishermanZoom
-      sourceHeight = sourceWidth / viewAspect
-    }
-    const sourceX = (fisherman.naturalWidth - sourceWidth) / 2
-    const sourceY = (fisherman.naturalHeight - sourceHeight) / 2
-    context.save()
-    context.globalAlpha = fishermanReveal
-    context.drawImage(
-      fisherman,
-      sourceX,
-      sourceY,
-      sourceWidth,
-      sourceHeight,
-      0,
-      0,
-      viewWidth,
-      viewHeight
-    )
-    context.restore()
-  }
-
-  context.drawImage(
-    cabin,
-    cropX,
-    cropY,
-    cropWidth,
-    cropHeight,
-    0,
-    0,
-    viewWidth,
-    viewHeight
-  )
-
-  if (frozenCabinFrame && progress < 0.12) {
-    context.save()
-    context.globalAlpha = 1 - smoothstep(0, 0.12, progress)
-    context.drawImage(frozenCabinFrame, 0, 0, viewWidth, viewHeight)
-    context.restore()
-  }
+  const fisherman = findNearestLoadedFrame(fishermanFrames, fishermanFrameIndex)
+  if (!fisherman) return
+  updateCabinFishermanSequenceTexture(fishermanFrameIndex, fisherman)
+  renderCabinFishermanFluid(performance.now())
 }
 
 function renderRedbullSequence(progress: number) {
@@ -1151,6 +1431,7 @@ function captureCabinFrame() {
   if (!frameContext) return
   frameContext.drawImage(source, 0, 0, frame.width, frame.height)
   frozenCabinFrame = frame
+  updateCabinFishermanCabinTexture()
 }
 
 function updateStoryScrollHeight() {
@@ -1159,85 +1440,57 @@ function updateStoryScrollHeight() {
   const fishermanHeight = fishermanScrollUnlocked.value ? fishermanScrollDistance : 0
   const redbullHeight = fishermanScrollUnlocked.value ? redbullScrollDistance : 0
   const wingsuitHeight = fishermanScrollUnlocked.value ? wingsuitScrollDistance : 0
-  const extraHeight = cabinHeight + fishermanHeight + redbullHeight + wingsuitHeight
+  const extraHeight = gymScrollDistance + cabinHeight + fishermanHeight + redbullHeight + wingsuitHeight
   scrollContainer.value.style.height = `${window.innerHeight + storyScrollStart + baseStoryScrollHeight + extraHeight}px`
   requestAnimationFrame(() => lenis?.resize())
 }
 
-function unlockCabinScroll() {
-  if (cabinScrollUnlocked.value) return
-  void preloadCabinTransitionAsset().then(ready => {
-    if (!ready || cabinScrollUnlocked.value) return
-    cabinScrollUnlocked.value = true
-    updateStoryScrollHeight()
-  })
-}
-
-function handleWelcomeVideoTimeUpdate() {
-  const video = welcomeVideo.value
-  if (!video || !showWelcome.value || cabinScrollUnlocked.value) return
-  const duration = Number.isFinite(video.duration) ? video.duration : 0
-  const reachedEnd = duration > 0 && video.currentTime >= duration - 0.14
-  const looped = duration > 0 && previousWelcomeVideoTime > duration * 0.72 && video.currentTime < 0.35
-  previousWelcomeVideoTime = video.currentTime
-  if (reachedEnd || looped) unlockCabinScroll()
-}
-
-async function resumeGymFromBeginning() {
-  const video = welcomeVideo.value
-  const playbackSession = ++gymPlaybackSession
-  showWelcome.value = true
+function resetCabinToGym() {
   cabinScrollLocked.value = false
-  cabinBridgeActive.value = false
   cabinSceneActive.value = false
   showCabinScene.value = false
   cabinTransitionActive.value = false
+  cabinFishermanFluidActive.value = false
   frozenCabinFrame = null
-  typedSubtitle.value = ''
-  if (!video) return
-  video.currentTime = 0
-  video.muted = true
-  scheduleCabinUnlock(video)
-  try {
-    await video.play()
-    if (playbackSession !== gymPlaybackSession || cabinTransitionProgress > 0.0001) {
-      video.pause()
-      video.muted = true
-      return
-    }
-    if (welcomeAudioUnlocked) video.muted = false
-    scheduleCabinUnlock(video)
-  } catch {
-    if (playbackSession !== gymPlaybackSession) return
-    video.muted = true
-    await video.play().catch(() => undefined)
-    if (!video.paused) scheduleCabinUnlock(video)
-    if (playbackSession !== gymPlaybackSession || cabinTransitionProgress > 0.0001) {
-      video.pause()
-      video.muted = true
-    }
+}
+
+function updateGymFromScroll(progress: number) {
+  gymSequenceProgress = clamp01(progress)
+  if (progress < 0) {
+    showWelcome.value = false
+    if (canvasEl.value) canvasEl.value.style.visibility = 'visible'
+    return
   }
+
+  if (!showCabinScene.value || cabinTransitionProgress < 0.5) {
+    showWelcome.value = true
+  }
+  if (canvasEl.value) canvasEl.value.style.visibility = 'hidden'
+  renderGymSequence(gymSequenceProgress)
 }
 
 function updateCabinPanels(progress: number) {
   const nextProgress = clamp01(progress)
-  const firstSectionProgress = clamp01(nextProgress * 2)
-  const secondSectionProgress = clamp01((nextProgress - 0.5) * 2)
 
   if (welcomeScene.value) {
-    welcomeScene.value.style.transform = `translate3d(0, ${-firstSectionProgress * window.innerHeight}px, 0)`
-  }
-
-  if (cabinBridgeScene.value) {
-    const bridgeY = nextProgress <= 0.5
-      ? (1 - firstSectionProgress) * window.innerHeight
-      : -secondSectionProgress * window.innerHeight
-    cabinBridgeScene.value.style.transform = `translate3d(0, ${bridgeY}px, 0)`
+    welcomeScene.value.style.transform = `translate3d(0, ${-nextProgress * window.innerHeight}px, 0)`
   }
 
   if (embeddedCabinScene.value) {
-    embeddedCabinScene.value.style.transform = `translate3d(0, ${(1 - secondSectionProgress) * window.innerHeight}px, 0)`
+    embeddedCabinScene.value.style.transform = `translate3d(0, ${(1 - nextProgress) * window.innerHeight}px, 0)`
   }
+}
+
+function activateCabinSceneWhenReady() {
+  if (!cabinSceneReady.value || cabinTransitionProgress < 0.995) return false
+  cabinSceneActive.value = true
+  // Seat the incoming panel exactly on the viewport before removing the
+  // outgoing layer; otherwise the 0.5% threshold can expose a thin black seam.
+  updateCabinPanels(1)
+  showWelcome.value = false
+  cabinScrollLocked.value = true
+  lenis?.stop()
+  return true
 }
 
 function updateCabinFromScroll(progress: number) {
@@ -1246,38 +1499,42 @@ function updateCabinFromScroll(progress: number) {
   cabinTransitionProgress = nextProgress
 
   if (nextProgress <= 0.0001) {
-    if (previousProgress > 0.0001 || showCabinScene.value) resumeGymFromBeginning()
+    if (previousProgress > 0.0001 || showCabinScene.value) resetCabinToGym()
     updateCabinPanels(0)
     return
   }
 
   cabinTransitionActive.value = false
-  cabinBridgeActive.value = true
   if (nextProgress < 0.995 && cabinSceneActive.value) cabinSceneActive.value = false
-  if (nextProgress < 0.5) showWelcome.value = true
-  if (nextProgress >= 0.5 && !showCabinScene.value) {
+  showWelcome.value = true
+  if (!showCabinScene.value) {
     showCabinScene.value = true
     requestAnimationFrame(() => updateCabinPanels(cabinTransitionProgress))
   }
-  if (nextProgress < 0.5 && showCabinScene.value) showCabinScene.value = false
   updateCabinPanels(nextProgress)
 
   if (nextProgress >= 0.995 && !cabinSceneActive.value) {
-    cabinSceneActive.value = true
-    showWelcome.value = false
-    stopGymMedia()
-    lenis?.stop()
+    // Stop at the handoff, but never remove the outgoing canvas until the
+    // already-mounted cabin canvas has emitted its first rendered frame.
     cabinScrollLocked.value = true
+    lenis?.stop()
+    activateCabinSceneWhenReady()
   }
 }
 
 function handleEmbeddedCabinReady() {
-  if (!showCabinScene.value) return
-  requestAnimationFrame(() => updateCabinPanels(cabinTransitionProgress))
+  cabinSceneReady.value = true
+  requestAnimationFrame(() => {
+    updateCabinPanels(cabinTransitionProgress)
+    activateCabinSceneWhenReady()
+  })
 }
 
-function handleCabinScrollUnlocked() {
+async function handleCabinScrollUnlocked() {
   if (!showCabinScene.value) return
+  if (!cabinFishermanFluidRenderer) {
+    await initCabinFishermanFluid()
+  }
   fishermanScrollUnlocked.value = true
   updateStoryScrollHeight()
   cabinScrollLocked.value = false
@@ -1290,13 +1547,20 @@ function updateFishermanFromScroll(progress: number) {
   if (fishermanTransitionProgress <= 0.0001) {
     if (previousProgress > 0.0001) {
       cabinTransitionActive.value = false
+      cabinFishermanFluidActive.value = false
       frozenCabinFrame = null
+      cabinFishermanRenderedProgress = 0
+      cabinFishermanRenderedFrame = -1
     }
     return
   }
 
-  if (previousProgress <= 0.0001 && !frozenCabinFrame) captureCabinFrame()
-  cabinTransitionActive.value = true
+  if (previousProgress <= 0.0001 && !frozenCabinFrame) {
+    captureCabinFrame()
+    cabinFishermanAnimationStartTime = performance.now()
+  }
+  cabinTransitionActive.value = false
+  cabinFishermanFluidActive.value = true
   renderFishermanTransition(fishermanTransitionProgress)
 }
 
@@ -1306,12 +1570,14 @@ function updateRedbullFromScroll(progress: number) {
 
   if (redbullSequenceProgress <= 0.0001) {
     if (previousProgress > 0.0001 && fishermanTransitionProgress >= 0.999) {
-      cabinTransitionActive.value = true
+      cabinTransitionActive.value = false
+      cabinFishermanFluidActive.value = true
       renderFishermanTransition(1)
     }
     return
   }
 
+  cabinFishermanFluidActive.value = false
   cabinTransitionActive.value = true
   renderRedbullSequence(redbullSequenceProgress)
 }
@@ -1335,8 +1601,15 @@ function setupScroll() {
   )
   transitionSequenceDistance = Math.max(1, storyScrollStart - transitionSequenceStart)
   heroScrollEnd = storyScrollStart + videoScrollHeight
+  gymScrollDistance = GYM_TOTAL_FRAMES * GYM_SCROLL_PX_PER_FRAME
   cabinScrollDistance = Math.max(1800, window.innerHeight * 2)
-  fishermanScrollDistance = Math.max(2400, window.innerHeight * 2.8)
+  fishermanScrollDistance = Math.max(
+    Math.ceil(
+      (FISHERMAN_TOTAL_FRAMES * FISHERMAN_SCROLL_PX_PER_FRAME)
+      / (1 - FISHERMAN_SEQUENCE_START),
+    ),
+    window.innerHeight * 2.8,
+  )
   redbullScrollDistance = REDBULL_TOTAL_FRAMES * REDBULL_SCROLL_PX_PER_FRAME
   wingsuitScrollDistance = Math.max(1400, window.innerHeight * 1.8)
   updateStoryScrollHeight()
@@ -1352,11 +1625,7 @@ function setupScroll() {
   
   lenis.on('scroll', ({ scroll, limit }: { scroll: number; limit: number }) => {
     if (isZoomed.value) return
-    // Before the Cabin range exists, Lenis' live limit is the only reliable
-    // endpoint on mobile because Safari's address bar changes viewport height.
-    if (!cabinScrollUnlocked.value) {
-      heroScrollEnd = Math.max(storyScrollStart + 1, limit || storyScrollStart + videoScrollHeight)
-    }
+    void limit
     const nextFluidHeroActive = scroll < storyScrollStart
     const completedIntroHandoff = fluidHeroActive.value && !nextFluidHeroActive
     fluidHeroActive.value = nextFluidHeroActive
@@ -1383,25 +1652,29 @@ function setupScroll() {
       }
     }
 
+    const gymProgress = (scroll - heroScrollEnd) / Math.max(1, gymScrollDistance)
+    updateGymFromScroll(gymProgress)
+
+    const cabinScrollStart = heroScrollEnd + gymScrollDistance
     const transitionProgress = cabinScrollUnlocked.value
-      ? (scroll - heroScrollEnd) / Math.max(1, cabinScrollDistance)
+      ? (scroll - cabinScrollStart) / Math.max(1, cabinScrollDistance)
       : 0
     updateCabinFromScroll(transitionProgress)
 
     const fishermanProgress = fishermanScrollUnlocked.value
-      ? (scroll - heroScrollEnd - cabinScrollDistance) / Math.max(1, fishermanScrollDistance)
+      ? (scroll - cabinScrollStart - cabinScrollDistance) / Math.max(1, fishermanScrollDistance)
       : 0
     updateFishermanFromScroll(fishermanProgress)
 
     const redbullProgress = fishermanScrollUnlocked.value
-      ? (scroll - heroScrollEnd - cabinScrollDistance - fishermanScrollDistance) / Math.max(1, redbullScrollDistance)
+      ? (scroll - cabinScrollStart - cabinScrollDistance - fishermanScrollDistance) / Math.max(1, redbullScrollDistance)
       : 0
     updateRedbullFromScroll(redbullProgress)
 
     const wingsuitProgress = fishermanScrollUnlocked.value
       ? (
           scroll
-          - heroScrollEnd
+          - cabinScrollStart
           - cabinScrollDistance
           - fishermanScrollDistance
           - redbullScrollDistance
@@ -1417,66 +1690,57 @@ function setupScroll() {
     }
   })
 
-  const run = (t: number) => { lenis?.raf(t); requestAnimationFrame(run) }
-  requestAnimationFrame(run)
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 onMounted(async () => {
   resizeCanvas()
   ctx = canvasEl.value!.getContext('2d')
-  preloadCabinTransitionAsset()
   prepareCabinAudio()
   window.addEventListener('resize', resizeCanvas)
-  window.addEventListener('pointerdown', primeWelcomeAudio)
-  window.addEventListener('touchstart', primeWelcomeAudio, { passive: true })
-  window.addEventListener('wheel', primeWelcomeAudio, { passive: true })
-  window.addEventListener('keydown', primeWelcomeAudio)
   window.addEventListener('pointerdown', primeCabinAudio)
   window.addEventListener('touchstart', primeCabinAudio, { passive: true })
   window.addEventListener('keydown', primeCabinAudio)
-  window.addEventListener('pointermove', handleWelcomePovMove, { passive: true })
-  welcomeScene.value?.addEventListener('pointerdown', handleWelcomePovDown, { passive: true })
-  welcomeVideo.value?.addEventListener('timeupdate', handleWelcomeVideoTimeUpdate)
-  window.addEventListener('pointerup', handleWelcomePovUp)
-  window.addEventListener('pointercancel', handleWelcomePovUp)
-  povRafId = requestAnimationFrame(updateWelcomePov)
-  updateWelcomeSubtitle()
-  await preloadFrames()
+  const [, cabinReady] = await Promise.all([
+    Promise.all([preloadFrames(), loadGymFrame(0), loadFishermanFrame(0)]),
+    preloadCabinTransitionAsset(),
+    initGymCabinFluid(),
+  ])
+  cabinScrollUnlocked.value = cabinReady
   isLoading.value = false
   drawFrame(0)
+  renderGymSequence(0)
   setupScroll()
   tick()
-  void preloadRedbullFrames()
+  void (async () => {
+    await preloadGymFrames()
+    await preloadFishermanFrames()
+    await preloadRedbullFrames()
+  })()
 })
 
 onUnmounted(() => {
   cancelAnimationFrame(rafId)
-  cancelAnimationFrame(subtitleRafId)
-  cancelAnimationFrame(povRafId)
   lenis?.destroy()
   if (idleTimeout) clearTimeout(idleTimeout)
   if (idleTween) idleTween.kill()
   window.removeEventListener('resize', resizeCanvas)
   window.removeEventListener('mousemove', handleMouseMove)
-  window.removeEventListener('pointerdown', primeWelcomeAudio)
-  window.removeEventListener('touchstart', primeWelcomeAudio)
-  window.removeEventListener('wheel', primeWelcomeAudio)
-  window.removeEventListener('keydown', primeWelcomeAudio)
   window.removeEventListener('touchstart', primeCabinAudio)
   removeCabinAudioPrimeListeners()
-  window.removeEventListener('pointermove', handleWelcomePovMove)
-  welcomeScene.value?.removeEventListener('pointerdown', handleWelcomePovDown)
-  welcomeVideo.value?.removeEventListener('timeupdate', handleWelcomeVideoTimeUpdate)
-  window.removeEventListener('pointerup', handleWelcomePovUp)
-  window.removeEventListener('pointercancel', handleWelcomePovUp)
-  stopGymMedia()
   frozenCabinFrame = null
   cabinTransitionImage = null
   cabinTransitionAssetPromise = null
-  fishermanImage = null
+  disposeGymCabinFluid()
+  disposeCabinFishermanFluid()
+  gymPreloadCancelled = true
+  fishermanPreloadCancelled = true
   redbullPreloadCancelled = true
+  gymFramePromises.clear()
+  fishermanFramePromises.clear()
   redbullFramePromises.clear()
+  gymFrames.fill(undefined)
+  fishermanFrames.fill(undefined)
   redbullFrames.fill(undefined)
   for (const audio of [preparedCabinChime.value, preparedCabinAnnouncement.value]) {
     if (!audio) continue
@@ -1485,7 +1749,6 @@ onUnmounted(() => {
   }
   preparedCabinChime.value = null
   preparedCabinAnnouncement.value = null
-  if (welcomePov.value) gsap.killTweensOf(welcomePov.value)
 })
 </script>
 
@@ -1547,23 +1810,15 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
-.cabin-bridge-scene {
+.cabin-fisherman-fluid-canvas {
   position: fixed;
   inset: 0;
-  z-index: 6;
-  overflow: hidden;
-  background: #f4f4f3;
-  pointer-events: none;
-  will-change: transform;
-}
-
-.cabin-bridge-image {
+  z-index: 8;
   width: 100%;
   height: 100%;
   display: block;
-  object-fit: cover;
-  object-position: center;
-  user-select: none;
+  pointer-events: none;
+  contain: strict;
 }
 
 .embedded-cabin-scene {
@@ -1571,7 +1826,13 @@ onUnmounted(() => {
   inset: 0;
   z-index: 7;
   overflow: hidden;
+  transform: translate3d(0, 100%, 0);
+  pointer-events: none;
   will-change: transform;
+}
+
+.embedded-cabin-scene.is-interactive {
+  pointer-events: auto;
 }
 
 .scroll-container {
@@ -1601,7 +1862,6 @@ onUnmounted(() => {
 
 @media (prefers-reduced-motion: reduce) {
   .welcome-scene,
-  .cabin-bridge-scene,
   .embedded-cabin-scene {
     will-change: auto;
   }
@@ -1609,65 +1869,27 @@ onUnmounted(() => {
 
 .welcome-scene.is-active {
   opacity: 1;
-  pointer-events: auto;
-  touch-action: pan-y;
-  cursor: grab;
+  pointer-events: none;
 }
 
-.welcome-scene.is-active:active {
-  cursor: grabbing;
-}
-
-.welcome-pov {
+.gym-sequence-canvas {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
   will-change: transform;
   pointer-events: none;
 }
 
-.welcome-video {
+.gym-cabin-fluid-canvas {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  width: max(124vw, 222.35vh);
-  height: max(124vh, 69.14vw);
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
   display: block;
-  max-width: none;
-  transform: translate(-50%, -50%);
   pointer-events: none;
-}
-
-.welcome-subtitle {
-  position: absolute;
-  left: 50%;
-  bottom: max(38px, calc(env(safe-area-inset-bottom) + 18px));
-  z-index: 6;
-  width: min(900px, calc(100vw - 32px));
-  transform: translateX(-50%);
-  color: #fff;
-  font-size: clamp(0.9rem, 1.7vw, 1.2rem);
-  font-weight: 500;
-  line-height: 1.45;
-  text-align: center;
-  text-wrap: balance;
-  white-space: pre-line;
-  text-shadow: 0 2px 5px #000, 0 0 12px rgba(0, 0, 0, 0.9);
-}
-
-.gym-audio-prompt {
-  display: block;
-  margin-top: 7px;
-  font-size: 0.72em;
-  letter-spacing: 0.04em;
-  opacity: 0.82;
-}
-
-@media (hover: none), (pointer: coarse) {
-  .welcome-subtitle {
-    bottom: max(24px, calc(env(safe-area-inset-bottom) + 12px));
-    width: calc(100vw - 28px);
-    font-size: 0.88rem;
-  }
 }
 
 .loading-overlay {

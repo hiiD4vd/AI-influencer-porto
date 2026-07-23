@@ -38,6 +38,17 @@
         {{ typedSubtitle || audioPrompt }}
       </div>
 
+      <button
+        v-if="props.active && !showScrollPrompt"
+        class="skip-cabin"
+        type="button"
+        aria-label="Skip the cabin announcement"
+        @pointerdown.stop
+        @click.stop="skipCabinSequence"
+      >
+        Skip
+      </button>
+
       <div v-show="!announcementPlaying && !showScrollPrompt" class="drag-hint" aria-hidden="true">
         <span></span>
         Drag to look around
@@ -65,7 +76,7 @@ const props = withDefaults(defineProps<{
 })
 
 const { embedded } = props
-const cabinImagePath = '/images/cabin-windows.png'
+const cabinImagePath = '/images/kabin dan jendela.png'
 
 const emit = defineEmits<{
   ready: []
@@ -159,6 +170,7 @@ let destroyed = false
 let subtitleClearTimeout: ReturnType<typeof setTimeout> | null = null
 let scrollPromptStartedAt = 0
 let scrollUnlockEmitted = false
+let audioSkipped = false
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
@@ -189,6 +201,35 @@ function prepareImage(image: HTMLImageElement): SceneImage {
   bufferContext.imageSmoothingEnabled = true
   bufferContext.imageSmoothingQuality = 'high'
   bufferContext.drawImage(image, 0, 0, buffer.width, buffer.height)
+  return { source: buffer, width: buffer.width, height: buffer.height }
+}
+
+function prepareCabinImage(image: HTMLImageElement): SceneImage {
+  const sourceWidth = image.naturalWidth
+  const sourceHeight = image.naturalHeight
+  const windowSectionAspect = 3762 / 1758
+  const cropHeight = Math.min(sourceHeight, sourceWidth / windowSectionAspect)
+  const cropY = sourceHeight - cropHeight
+  const maxDimension = 4096
+  const ratio = Math.min(1, maxDimension / Math.max(sourceWidth, cropHeight))
+  const buffer = document.createElement('canvas')
+  buffer.width = Math.max(1, Math.round(sourceWidth * ratio))
+  buffer.height = Math.max(1, Math.round(cropHeight * ratio))
+  const bufferContext = buffer.getContext('2d')
+  if (!bufferContext) throw new Error('Could not prepare cabin master image')
+  bufferContext.imageSmoothingEnabled = true
+  bufferContext.imageSmoothingQuality = 'high'
+  bufferContext.drawImage(
+    image,
+    0,
+    cropY,
+    sourceWidth,
+    cropHeight,
+    0,
+    0,
+    buffer.width,
+    buffer.height,
+  )
   return { source: buffer, width: buffer.width, height: buffer.height }
 }
 
@@ -266,6 +307,7 @@ function createClouds() {
 }
 
 function setupAudioSequence() {
+  if (audioSkipped) return
   if (audioPrepared) {
     void tryStartAudio()
     return
@@ -287,7 +329,7 @@ function setupAudioSequence() {
 }
 
 async function tryStartAudio() {
-  if (audioStarted || audioStarting || !chimeAudio || destroyed || !props.active) return
+  if (audioSkipped || audioStarted || audioStarting || !chimeAudio || destroyed || !props.active) return
   audioStarting = true
   try {
     await chimeAudio.play()
@@ -302,7 +344,7 @@ async function tryStartAudio() {
 }
 
 function playAnnouncement() {
-  if (!announcementAudio || destroyed || !props.active) return
+  if (audioSkipped || !announcementAudio || destroyed || !props.active) return
   announcementAudio.currentTime = 0
   typedSubtitle.value = ''
   showScrollPrompt.value = false
@@ -316,7 +358,7 @@ function playAnnouncement() {
 }
 
 function resumeAnnouncement() {
-  if (!announcementAudio || destroyed || !props.active) return
+  if (audioSkipped || !announcementAudio || destroyed || !props.active) return
   void announcementAudio.play().then(() => {
     announcementPlaying.value = true
     audioPrompt.value = ''
@@ -331,6 +373,32 @@ function finishAnnouncement() {
     showScrollPrompt.value = true
     scrollPromptStartedAt = performance.now()
   }, 450)
+}
+
+function skipCabinSequence() {
+  audioSkipped = true
+  audioStarting = false
+  audioStarted = true
+  chimeAudio?.pause()
+  announcementAudio?.pause()
+  if (chimeAudio) chimeAudio.currentTime = 0
+  if (announcementAudio) announcementAudio.currentTime = 0
+  removeAudioUnlockListeners()
+  window.removeEventListener('pointerdown', resumeAnnouncement)
+  window.removeEventListener('keydown', resumeAnnouncement)
+  if (subtitleClearTimeout) {
+    clearTimeout(subtitleClearTimeout)
+    subtitleClearTimeout = null
+  }
+  announcementPlaying.value = false
+  audioPrompt.value = ''
+  showScrollPrompt.value = true
+  typedSubtitle.value = SCROLL_PROMPT
+  scrollPromptStartedAt = performance.now() - SCROLL_PROMPT.length * 38
+  if (!scrollUnlockEmitted) {
+    scrollUnlockEmitted = true
+    emit('scroll-unlocked')
+  }
 }
 
 function updateSubtitle() {
@@ -396,7 +464,7 @@ async function initialiseScene() {
   ])
   if (destroyed) return
 
-  const preparedCabin = prepareImage(loadedCabin)
+  const preparedCabin = prepareCabinImage(loadedCabin)
   skyLayer = buildGradientLayer(preparedCabin)
   cabinLayer = preparedCabin
   cloudImages = [prepareImage(loadedCloudOne), prepareImage(loadedCloudTwo)]
@@ -426,6 +494,7 @@ watch(() => props.active, active => {
   typedSubtitle.value = ''
   audioPrompt.value = ''
   scrollUnlockEmitted = false
+  audioSkipped = false
   if (subtitleClearTimeout) {
     clearTimeout(subtitleClearTimeout)
     subtitleClearTimeout = null
@@ -755,6 +824,7 @@ onUnmounted(() => {
 }
 .fallback-sky { background: linear-gradient(180deg, #49B2E7 0%, #BDDAEC 100%); }
 .fallback-cabin { z-index: 2; }
+.fallback-cabin { object-position: center bottom; }
 
 .cabin-subtitle {
   position: absolute;
@@ -772,6 +842,35 @@ onUnmounted(() => {
   white-space: pre-line;
   text-shadow: 0 2px 5px #000, 0 0 12px rgba(0, 0, 0, 0.9);
   pointer-events: none;
+}
+
+.skip-cabin {
+  position: absolute;
+  z-index: 12;
+  top: max(26px, calc(env(safe-area-inset-top) + 14px));
+  right: max(22px, calc(env(safe-area-inset-right) + 16px));
+  min-width: 70px;
+  height: 36px;
+  padding: 0 18px;
+  border: 1px solid rgba(255, 255, 255, 0.46);
+  border-radius: 999px;
+  background: rgba(12, 17, 20, 0.58);
+  color: #fff;
+  font: 600 0.68rem/1 'Inter', sans-serif;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+.skip-cabin:hover {
+  background: rgba(12, 17, 20, 0.76);
+  border-color: rgba(255, 255, 255, 0.78);
+}
+.skip-cabin:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
 }
 
 .drag-hint {
@@ -795,6 +894,14 @@ onUnmounted(() => {
 
 @media (max-width: 700px) {
   .drag-hint { font-size: .56rem; bottom: max(18px, env(safe-area-inset-bottom)); }
+  .skip-cabin {
+    top: max(18px, calc(env(safe-area-inset-top) + 10px));
+    right: max(14px, calc(env(safe-area-inset-right) + 10px));
+    min-width: 62px;
+    height: 34px;
+    padding-inline: 14px;
+    font-size: 0.62rem;
+  }
 }
 
 @media (hover: none), (pointer: coarse) {
