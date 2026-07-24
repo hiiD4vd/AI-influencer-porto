@@ -357,7 +357,11 @@ function updateTransitionSequence(progress: number) {
 
 function loadTexture(loader: THREE.TextureLoader, path: string) {
   return loader.loadAsync(path).then(texture => {
-    texture.colorSpace = THREE.SRGBColorSpace
+    // LinearSRGBColorSpace = no GPU sRGB decode. The custom ShaderMaterial
+    // reads raw sRGB bytes and passes them straight to gl_FragColor.
+    // Combined with outputColorSpace = LinearSRGBColorSpace on the renderer,
+    // no conversion is applied anywhere → colors match the original JPEG exactly.
+    texture.colorSpace = THREE.LinearSRGBColorSpace
     texture.minFilter = THREE.LinearFilter
     texture.magFilter = THREE.LinearFilter
     texture.generateMipmaps = false
@@ -375,7 +379,7 @@ function createWhiteTexture() {
   context.fillRect(0, 0, surface.width, surface.height)
 
   const texture = new THREE.CanvasTexture(surface)
-  texture.colorSpace = THREE.SRGBColorSpace
+  texture.colorSpace = THREE.LinearSRGBColorSpace
   texture.minFilter = THREE.LinearFilter
   texture.magFilter = THREE.LinearFilter
   texture.generateMipmaps = false
@@ -455,6 +459,10 @@ onMounted(async () => {
 
     renderer1 = new THREE.WebGLRenderer({ antialias: false, alpha: true })
     renderer2 = new THREE.WebGLRenderer({ antialias: false, alpha: true })
+    // No output color space conversion — raw sRGB values from the custom
+    // shader pass through unchanged so no double-gamma filter is applied.
+    renderer1.outputColorSpace = THREE.LinearSRGBColorSpace
+    renderer2.outputColorSpace = THREE.LinearSRGBColorSpace
     renderer1.setSize(window.innerWidth, window.innerHeight)
     renderer2.setSize(window.innerWidth, window.innerHeight)
     canvas1.value.appendChild(renderer1.domElement)

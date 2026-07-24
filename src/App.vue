@@ -1,4 +1,11 @@
 <template>
+  <nav class="shared-nav">
+    <RouterLink to="/showcase" class="nav-link" :class="{ active: $route.name === 'showcase' || $route.name === 'showcase-root' }">Showcase</RouterLink>
+    <RouterLink to="/vibe" class="nav-link" :class="{ active: $route.name === 'vibe' }">Vibe</RouterLink>
+
+    <RouterLink to="/transition-test" class="nav-link" :class="{ active: $route.name === 'transition-test' }">FX</RouterLink>
+  </nav>
+
   <RouterView v-slot="{ Component }">
     <Transition name="page" mode="out-in">
       <component :is="Component" :key="$route.path" />

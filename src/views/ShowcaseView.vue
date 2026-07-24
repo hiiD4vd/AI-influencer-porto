@@ -1,13 +1,5 @@
 <template>
   <div class="showcase-view">
-    <!-- Navigation -->
-    <nav class="shared-nav">
-      <RouterLink to="/" class="nav-link" :class="{ active: $route.name === 'home' }">Home</RouterLink>
-      <RouterLink to="/showcase" class="nav-link" :class="{ active: $route.name === 'showcase' }">Showcase</RouterLink>
-      <RouterLink to="/vibe" class="nav-link" :class="{ active: $route.name === 'vibe' }">Vibe</RouterLink>
-      <RouterLink to="/cabin-test" class="nav-link" :class="{ active: $route.name === 'cabin-test' }">Cabin</RouterLink>
-    </nav>
-
     <!-- Side labels -->
     <div class="side-label left"><span>Drag to explore</span></div>
     <div class="side-label right"><span>{{ CARD_DATA.length }} Projects</span></div>
