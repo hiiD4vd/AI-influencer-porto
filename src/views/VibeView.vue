@@ -9,10 +9,8 @@
   >
     <!-- Navigation -->
     <nav class="shared-nav">
-      <RouterLink to="/" class="nav-link" :class="{ active: $route.name === 'home' }">Home</RouterLink>
-      <RouterLink to="/showcase" class="nav-link" :class="{ active: $route.name === 'showcase' }">Showcase</RouterLink>
+      <RouterLink to="/showcase" class="nav-link" :class="{ active: $route.name === 'showcase' || $route.name === 'showcase-root' }">Showcase</RouterLink>
       <RouterLink to="/vibe" class="nav-link" :class="{ active: $route.name === 'vibe' }">Vibe</RouterLink>
-      <RouterLink to="/cabin-test" class="nav-link" :class="{ active: $route.name === 'cabin-test' }">Cabin</RouterLink>
       <RouterLink to="/transition-test" class="nav-link" :class="{ active: $route.name === 'transition-test' }">FX</RouterLink>
     </nav>
 
@@ -61,6 +59,12 @@
     ></canvas>
 
     <canvas
+      v-show="spacerFluidActive"
+      ref="spacerFluidCanvas"
+      class="spacer-fluid-canvas"
+    ></canvas>
+
+    <canvas
       v-show="cabinFishermanFluidActive"
       ref="cabinFishermanFluidCanvas"
       class="cabin-fisherman-fluid-canvas"
@@ -84,7 +88,20 @@
         @ready="handleEmbeddedCabinReady"
         @scroll-unlocked="handleCabinScrollUnlocked"
       />
+
+      <!-- Replay button: shown when cabin was already completed and user scrolls back -->
+      <Transition name="replay-fade">
+        <button
+          v-if="cabinEverCompleted && showCabinScene && !cabinSceneActive && cabinTransitionProgress >= 0.98"
+          class="cabin-replay-btn"
+          @click="cabinEverCompleted = false"
+          aria-label="Replay cabin scene"
+        >
+          ↺ Replay Cabin
+        </button>
+      </Transition>
     </section>
+
 
     <div class="carousel-scene" v-show="showCarousel" ref="carouselScene">
       
@@ -182,7 +199,7 @@ const TOTAL_FRAMES = 259
 const TRANSITION_SEQUENCE_LAST_FRAME = 34
 const SCROLL_PX_PER_FRAME = 12
 const FRAME_PATH = (i: number) => `/frames/hero/frame_${String(i).padStart(4, '0')}.jpg`
-const REDBULL_TOTAL_FRAMES = 224
+const REDBULL_TOTAL_FRAMES = 366
 const REDBULL_SCROLL_PX_PER_FRAME = 12
 const REDBULL_FRAME_PATH = (i: number) => `/frames/redbull/frame_${String(i).padStart(4, '0')}.webp`
 const GYM_TOTAL_FRAMES = 97
@@ -191,8 +208,8 @@ const GYM_SEQUENCE_VERSION = 'new-gym-sequence-20260723'
 const GYM_FRAME_PATH = (i: number) => `/frames/gym-sequence/frame_${String(i).padStart(4, '0')}.webp?v=${GYM_SEQUENCE_VERSION}`
 const FISHERMAN_TOTAL_FRAMES = 97
 const FISHERMAN_SCROLL_PX_PER_FRAME = 12
-const FISHERMAN_SEQUENCE_START = 0.58
-const FISHERMAN_FRAME_PATH = (i: number) => `/frames/fisherman-sequence/frame_${String(i).padStart(4, '0')}.webp`
+const FISHERMAN_SEQUENCE_START = 0
+const FISHERMAN_FRAME_PATH = (i: number) => `/frames/fisherman-sequence/frame_${String(i).padStart(4, '0')}.jpg`
 
 const LAST_FRAME_PNG = { w: 1920, h: 1080 }
 const CARD_IN_PNG = {
@@ -224,6 +241,8 @@ const gymCabinFluidCanvas = ref<HTMLCanvasElement | null>(null)
 const showWelcome    = ref(false)
 const cabinTransitionCanvas = ref<HTMLCanvasElement | null>(null)
 const cabinTransitionActive = ref(false)
+const spacerFluidCanvas = ref<HTMLCanvasElement | null>(null)
+const spacerFluidActive = ref(false)
 const cabinFishermanFluidCanvas = ref<HTMLCanvasElement | null>(null)
 const cabinFishermanFluidActive = ref(false)
 const cabinSceneActive = ref(false)
@@ -233,6 +252,9 @@ const embeddedCabinScene = ref<HTMLElement | null>(null)
 const cabinScrollUnlocked = ref(false)
 const cabinScrollLocked = ref(false)
 const fishermanScrollUnlocked = ref(false)
+// Tracks whether user has completed the cabin section at least once this session.
+// When true, re-entering the cabin zone skips the interactive lock automatically.
+const cabinEverCompleted = ref(false)
 const wingsuitSectionProgress = ref(0)
 const fluidHeroActive = ref(true)
 const introTransitionMarker = ref<HTMLElement | null>(null)
@@ -282,6 +304,26 @@ let gymSequenceProgress = 0
 let cabinScrollDistance = 0
 let fishermanScrollDistance = 0
 let fishermanTransitionProgress = 0
+let fishermanSpacerScrollDistance = 0
+let fishermanSpacerProgress = 0
+let spacerScrollDistance = 0
+let spacerProgress = 0
+let spacerRedbullScrollDistance = 0
+let spacerRedbullProgress = 0
+
+let spacerFluidRenderer: THREE.WebGLRenderer | null = null
+let spacerFluidScene: THREE.Scene | null = null
+let spacerFluidCamera: THREE.OrthographicCamera | null = null
+let spacerFluidGeometry: THREE.PlaneGeometry | null = null
+let spacerFluidMaterial: THREE.ShaderMaterial | null = null
+let spacerFluidMesh: THREE.Mesh | null = null
+let spacerTexture1: THREE.CanvasTexture | null = null
+let spacerTexture2: THREE.CanvasTexture | null = null
+let spacerBuffer1: HTMLCanvasElement | null = null
+let spacerBuffer2: HTMLCanvasElement | null = null
+let spacerFluidRenderedProgress = 0
+let spacerFluidAnimationStartTime = 0
+let spacerFluidPhase = 0 // 1 for fisherman->spacer, 2 for spacer->redbull
 let redbullScrollDistance = 0
 let redbullSequenceProgress = 0
 let wingsuitScrollDistance = 0
@@ -398,67 +440,120 @@ const gymCabinFragmentShader = /* glsl */ `
   }
 `
 
-// The same living-noise vocabulary as Gym -> Cabin, but used as an outgoing
-// mask: the lower edge of the cabin erodes upward and reveals Fisherman below.
+// Pixel column wipe — cabin is wiped away from bottom to top.
+// The fisherman zone is revealed in the same way as the hero section:
+// it starts as a dark Sobel-outline drawing, then uColorReveal fills the
+// real colors in, and uEdgeIntensity fades the outline to zero.
 const cabinFishermanFragmentShader = /* glsl */ `
+  precision highp float;
+
   uniform sampler2D uCabinTexture;
   uniform sampler2D uFishermanTexture;
   uniform float uProgress;
-  uniform float uSpread;
   uniform float uTime;
   uniform vec2 uResolution;
+  uniform float uEdgeIntensity;   // 0.72 → 0  (outline fades)
+  uniform float uColorReveal;     // 0    → 1  (color fills in)
+  uniform float uEdgeBrightness;  // controls sparkle/contour intensity
   varying vec2 vUv;
 
-  float hash(vec2 point) {
-    vec3 point3 = vec3(point.xy, 1.0);
-    return fract(sin(dot(point3, vec3(37.1, 61.7, 12.4))) * 3758.5453123);
+  mat3 sobelX = mat3(
+    -1.0, 0.0, 1.0,
+    -2.0, 0.0, 2.0,
+    -1.0, 0.0, 1.0
+  );
+  mat3 sobelY = mat3(
+    -1.0, -2.0, -1.0,
+     0.0,  0.0,  0.0,
+     1.0,  2.0,  1.0
+  );
+
+  float getLuminance(vec3 color) {
+    return dot(color, vec3(0.299, 0.587, 0.114));
   }
 
-  float noise(vec2 point) {
-    vec2 cell = floor(point);
-    vec2 local = fract(point);
-    local *= local * (3.0 - 2.0 * local);
-    return mix(
-      mix(hash(cell), hash(cell + vec2(1.0, 0.0)), local.x),
-      mix(hash(cell + vec2(0.0, 1.0)), hash(cell + vec2(1.0, 1.0)), local.x),
-      local.y
-    );
+  float sobel(sampler2D tex, vec2 uv, vec2 texelSize) {
+    float gx = 0.0, gy = 0.0;
+    for (int i = -1; i <= 1; i++) {
+      for (int j = -1; j <= 1; j++) {
+        vec2 offset = vec2(float(i), float(j)) * texelSize;
+        float lum = getLuminance(texture2D(tex, uv + offset).rgb);
+        gx += lum * sobelX[i + 1][j + 1];
+        gy += lum * sobelY[i + 1][j + 1];
+      }
+    }
+    return sqrt(gx * gx + gy * gy);
   }
 
-  float fbm(vec2 point) {
-    float value = 0.0;
-    value += noise(point) * 0.5;
-    value += noise(point * 2.0) * 0.25;
-    value += noise(point * 4.0) * 0.125;
-    return value;
+  float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
   }
 
   void main() {
-    vec4 cabin = texture2D(uCabinTexture, vUv);
+    vec4 cabin     = texture2D(uCabinTexture,     vUv);
     vec4 fisherman = texture2D(uFishermanTexture, vUv);
 
-    float aspect = uResolution.x / max(uResolution.y, 1.0);
-    vec2 centeredUv = (vUv - 0.5) * vec2(aspect, 1.0);
-    vec2 noiseUv = centeredUv * 15.0;
-    float liquidTime = uTime * 0.105;
-    vec2 liquidWarp = vec2(
-      noise(noiseUv * 0.23 + vec2(liquidTime, -liquidTime * 0.4)),
-      noise(noiseUv * 0.23 + vec2(-liquidTime * 0.35, liquidTime * 0.75))
-    ) - 0.5;
-    float noiseValue = fbm(
-      noiseUv
-      + liquidWarp * 1.35
-      + vec2(liquidTime * 0.65, -liquidTime * 0.28)
+    // ── Column-wipe front ──
+    float pixelSize = 1.5;
+    vec2 pixelatedUv = floor(vUv * uResolution / pixelSize) * pixelSize / uResolution;
+    float wave = (
+      sin(pixelatedUv.x * 13.82 + uTime * 0.80) * 0.035
+      + sin(pixelatedUv.x * 32.04 - uTime * 0.45) * 0.014
+      + sin(pixelatedUv.x * 69.00 + uTime * 0.30) * 0.006
     );
+    float steppedInput = sin(pixelatedUv.x * 127.0 + uTime * 0.90) * 0.0045;
+    float columns = floor(steppedInput / 0.0015 + 0.5) * 0.0015;
+    float sectionFront = mix(-0.13, 1.13, uProgress) + wave + columns;
 
-    // At zero the front is below the viewport. As progress grows it travels
-    // upward, leaving irregular living islands of the cabin along its edge.
-    float revealFront = -0.34 + uProgress * 1.68;
-    float distanceToFront = vUv.y + (noiseValue - 0.5) * uSpread - revealFront;
-    float pixelSize = 1.0 / max(uResolution.y, 1.0);
-    float cabinAlpha = smoothstep(-pixelSize, pixelSize, distanceToFront);
+    // wipeMask = 1 → cabin; wipeMask = 0 → fisherman revealed.
+    float wipeMask = smoothstep(sectionFront - 0.007, sectionFront + 0.007, vUv.y);
 
-    gl_FragColor = mix(fisherman, cabin, cabinAlpha);
+    // ── Fisherman zone: black → Sobel outline → full color (same as hero) ──
+    vec2 texelSize = 1.0 / max(uResolution, vec2(1.0));
+    float edge = sobel(uFishermanTexture, vUv, texelSize);
+    edge = pow(edge, 0.7) * 2.0;
+    edge = clamp(edge, 0.0, 1.0);
+    // Start dark, reveal color over time
+    vec3 fishermanColor = mix(vec3(0.0), fisherman.rgb, uColorReveal);
+    // Add white Sobel outline that fades out
+    fishermanColor += vec3(1.0) * edge * uEdgeIntensity * 2.0;
+    fishermanColor = clamp(fishermanColor, 0.0, 1.0);
+
+    vec3 baseColor = mix(fishermanColor, cabin.rgb, wipeMask);
+
+    float edgeDistance = abs(vUv.y - sectionFront);
+
+    // ── Sparkle zone around the wipe edge ──
+    float edgeZoneWidth = 0.072 * (1.0 - uProgress) + 0.022;
+    float edgeZone = 1.0 - smoothstep(edgeZoneWidth * 0.2, edgeZoneWidth, edgeDistance);
+    vec2 sparkleCell = floor(vUv * uResolution / 1.25);
+    float sparkleSeed = hash(sparkleCell);
+    float sparkle = sparkleSeed * edgeZone;
+    float edgeBrightness = (1.0 - uProgress) * uEdgeBrightness;
+    baseColor += vec3(sparkle * 2.35 * edgeBrightness);
+
+    // ── Luminous contour exactly on the wipe boundary ──
+    float contourCell = hash(vec2(floor(gl_FragCoord.x / 1.5), 19.0));
+    float contourPulse = 0.92 + 0.08 * sin(uTime * 1.35 + floor(gl_FragCoord.x / 1.5) * 0.17);
+    float contourCoreWidth = mix(0.0035, 0.0065, contourCell);
+    float contourCore = 1.0 - smoothstep(contourCoreWidth, contourCoreWidth + 0.0045, edgeDistance);
+    float contourHalo = 1.0 - smoothstep(0.004, 0.020, edgeDistance);
+    float offsetSparkleSeed = hash(floor((vUv * uResolution + vec2(1.0, 3.0)) / 1.75) + 31.7);
+    float thirdSparkleSeed  = hash(floor((vUv * uResolution + vec2(3.0, 1.0)) / 2.25) + 73.1);
+    float denseSparkleSeed  = max(sparkleSeed, max(offsetSparkleSeed * 0.96, thirdSparkleSeed * 0.92));
+    float contourDust = smoothstep(0.16, 0.52, denseSparkleSeed) * (
+      1.0 - smoothstep(0.012, 0.040, edgeDistance)
+    );
+    float contourLight = (
+      contourCore * 1.85
+      + contourHalo * 0.46
+      + contourDust * 0.48
+    ) * contourPulse;
+    float contourVisibility = 0.78 + 0.22 * uEdgeBrightness;
+    float contourAlpha = clamp(contourLight * contourVisibility * 0.72, 0.0, 1.0);
+    baseColor = mix(baseColor, vec3(1.0), contourAlpha);
+
+    gl_FragColor = vec4(clamp(baseColor, 0.0, 1.0), 1.0);
   }
 `
 
@@ -541,6 +636,10 @@ function tick(time = performance.now()) {
   }
   renderGymCabinFluid(time)
   renderCabinFishermanFluid(time)
+  if (spacerFluidActive.value) {
+    const targetProgress = spacerFluidPhase === 1 ? fishermanSpacerProgress : spacerRedbullProgress
+    renderSpacerFluid(time, targetProgress, spacerFluidPhase)
+  }
 }
 
 // ── Zoom logic based on progress ──────────────────────────────────────────
@@ -889,6 +988,9 @@ function loadRedbullFrame(index: number): Promise<HTMLImageElement | null> {
     image.onload = () => {
       redbullFrames[safeIndex] = image
       redbullFramePromises.delete(safeIndex)
+      if (spacerRedbullProgress > 0 && spacerRedbullProgress < 0.999) {
+        updateSpacerRedbullFromScroll(spacerRedbullProgress)
+      }
       if (redbullSequenceProgress > 0) renderRedbullSequence(redbullSequenceProgress)
       resolve(image)
     }
@@ -1140,7 +1242,11 @@ async function initCabinFishermanFluid(): Promise<boolean> {
     cabinFishermanCabinTexture = new THREE.CanvasTexture(cabinFishermanCabinBuffer)
     cabinFishermanSequenceTexture = new THREE.CanvasTexture(cabinFishermanSequenceBuffer)
     for (const texture of [cabinFishermanCabinTexture, cabinFishermanSequenceTexture]) {
-      texture.colorSpace = THREE.SRGBColorSpace
+      // Canvas 2D stores raw sRGB bytes. A custom ShaderMaterial does NOT
+      // auto-decode them, so marking as SRGBColorSpace causes Three.js to
+      // re-encode to sRGB on output → double gamma (warna salah).
+      // LinearSRGBColorSpace = no conversion applied, values pass through as-is.
+      texture.colorSpace = THREE.LinearSRGBColorSpace
       texture.minFilter = THREE.LinearFilter
       texture.magFilter = THREE.LinearFilter
       texture.generateMipmaps = false
@@ -1151,12 +1257,14 @@ async function initCabinFishermanFluid(): Promise<boolean> {
       vertexShader: gymCabinVertexShader,
       fragmentShader: cabinFishermanFragmentShader,
       uniforms: {
-        uCabinTexture: { value: cabinFishermanCabinTexture },
+        uCabinTexture:    { value: cabinFishermanCabinTexture },
         uFishermanTexture: { value: cabinFishermanSequenceTexture },
-        uProgress: { value: 0 },
-        uSpread: { value: 0.5 },
-        uTime: { value: 0 },
-        uResolution: { value: new THREE.Vector2(1, 1) },
+        uProgress:        { value: 0 },
+        uTime:            { value: 0 },
+        uResolution:      { value: new THREE.Vector2(1, 1) },
+        uEdgeIntensity:   { value: 0.72 },
+        uColorReveal:     { value: 0.0 },
+        uEdgeBrightness:  { value: 0.35 },
       },
       depthTest: false,
       depthWrite: false,
@@ -1239,15 +1347,17 @@ function renderCabinFishermanFluid(time: number) {
   cabinFishermanRenderedProgress += (
     fishermanTransitionProgress - cabinFishermanRenderedProgress
   ) * smoothing
-  const dissolveProgress = smoothstep(
-    0,
-    FISHERMAN_SEQUENCE_START,
-    cabinFishermanRenderedProgress,
-  )
-  cabinFishermanFluidMaterial.uniforms.uProgress.value = dissolveProgress
+  // Pass raw smoothed progress directly — wipe and sequence are in sync from 0→1
+  cabinFishermanFluidMaterial.uniforms.uProgress.value = cabinFishermanRenderedProgress
   cabinFishermanFluidMaterial.uniforms.uTime.value = reducedMotion
     ? 0
     : (time - cabinFishermanAnimationStartTime) / 1000
+  // Drive the fisherman outline→color reveal exactly like the hero section:
+  // outline fades out over 0.08→0.72 of progress, color fills in over 0.24→0.9
+  const outlineFade = smoothstep(0.08, 0.72, cabinFishermanRenderedProgress)
+  const colorReveal = smoothstep(0.24, 0.90, cabinFishermanRenderedProgress)
+  cabinFishermanFluidMaterial.uniforms.uEdgeIntensity.value = 0.72 * (1 - outlineFade)
+  cabinFishermanFluidMaterial.uniforms.uColorReveal.value   = colorReveal
   cabinFishermanFluidRenderer.render(cabinFishermanFluidScene, cabinFishermanFluidCamera)
 }
 
@@ -1283,6 +1393,7 @@ function resizeCanvas() {
   renderGymSequence(gymSequenceProgress)
   resizeGymCabinFluid()
   resizeCabinFishermanFluid()
+  resizeSpacerFluid()
   if (cabinTransitionActive.value) {
     if (redbullSequenceProgress > 0.0001) {
       renderRedbullSequence(redbullSequenceProgress)
@@ -1306,6 +1417,9 @@ function resizeCanvas() {
       ),
       window.innerHeight * 2.8,
     )
+    fishermanSpacerScrollDistance = window.innerHeight * 1.5
+    spacerScrollDistance = window.innerHeight
+    spacerRedbullScrollDistance = window.innerHeight * 1.5
     wingsuitScrollDistance = Math.max(1400, window.innerHeight * 1.8)
     updateStoryScrollHeight()
   }
@@ -1362,9 +1476,8 @@ function preloadCabinTransitionAsset(): Promise<boolean> {
 }
 
 function renderFishermanTransition(progress: number) {
-  const sequenceProgress = clamp01(
-    (progress - FISHERMAN_SEQUENCE_START) / (1 - FISHERMAN_SEQUENCE_START),
-  )
+  // Frames start from 0 as soon as the transition begins (full range 0→1)
+  const sequenceProgress = clamp01(progress)
   const fishermanFrameIndex = Math.round(sequenceProgress * (FISHERMAN_TOTAL_FRAMES - 1))
   const exactFishermanFrame = fishermanFrames[fishermanFrameIndex]
   if (!exactFishermanFrame?.complete || !exactFishermanFrame.naturalWidth) {
@@ -1438,9 +1551,12 @@ function updateStoryScrollHeight() {
   if (!scrollContainer.value) return
   const cabinHeight = cabinScrollUnlocked.value ? cabinScrollDistance : 0
   const fishermanHeight = fishermanScrollUnlocked.value ? fishermanScrollDistance : 0
+  const fSpacerHeight = fishermanScrollUnlocked.value ? fishermanSpacerScrollDistance : 0
+  const spacerHeight = fishermanScrollUnlocked.value ? spacerScrollDistance : 0
+  const sRedbullHeight = fishermanScrollUnlocked.value ? spacerRedbullScrollDistance : 0
   const redbullHeight = fishermanScrollUnlocked.value ? redbullScrollDistance : 0
   const wingsuitHeight = fishermanScrollUnlocked.value ? wingsuitScrollDistance : 0
-  const extraHeight = gymScrollDistance + cabinHeight + fishermanHeight + redbullHeight + wingsuitHeight
+  const extraHeight = gymScrollDistance + cabinHeight + fishermanHeight + fSpacerHeight + spacerHeight + sRedbullHeight + redbullHeight + wingsuitHeight
   scrollContainer.value.style.height = `${window.innerHeight + storyScrollStart + baseStoryScrollHeight + extraHeight}px`
   requestAnimationFrame(() => lenis?.resize())
 }
@@ -1504,6 +1620,15 @@ function updateCabinFromScroll(progress: number) {
     return
   }
 
+  // If the user has already completed the cabin once, skip the interactive
+  // lock entirely — the transition animation plays but scroll is never frozen.
+  if (cabinEverCompleted.value && nextProgress >= 0.995 && !cabinSceneActive.value) {
+    cabinSceneActive.value = false
+    cabinScrollLocked.value = false
+    lenis?.start()
+    return
+  }
+
   cabinTransitionActive.value = false
   if (nextProgress < 0.995 && cabinSceneActive.value) cabinSceneActive.value = false
   showWelcome.value = true
@@ -1535,6 +1660,8 @@ async function handleCabinScrollUnlocked() {
   if (!cabinFishermanFluidRenderer) {
     await initCabinFishermanFluid()
   }
+  // Mark cabin as completed so re-entry is skipped automatically
+  cabinEverCompleted.value = true
   fishermanScrollUnlocked.value = true
   updateStoryScrollHeight()
   cabinScrollLocked.value = false
@@ -1564,22 +1691,253 @@ function updateFishermanFromScroll(progress: number) {
   renderFishermanTransition(fishermanTransitionProgress)
 }
 
-function updateRedbullFromScroll(progress: number) {
-  const previousProgress = redbullSequenceProgress
-  redbullSequenceProgress = clamp01(progress)
+async function initSpacerFluid(): Promise<boolean> {
+  const canvas = spacerFluidCanvas.value
+  if (!canvas) return false
 
-  if (redbullSequenceProgress <= 0.0001) {
-    if (previousProgress > 0.0001 && fishermanTransitionProgress >= 0.999) {
-      cabinTransitionActive.value = false
-      cabinFishermanFluidActive.value = true
-      renderFishermanTransition(1)
+  try {
+    spacerFluidScene = new THREE.Scene()
+    spacerFluidCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10)
+    spacerFluidCamera.position.z = 1
+    spacerFluidRenderer = new THREE.WebGLRenderer({
+      canvas,
+      alpha: true,
+      antialias: false,
+      powerPreference: 'high-performance',
+    })
+    spacerFluidRenderer.outputColorSpace = THREE.LinearSRGBColorSpace
+
+    spacerBuffer1 = createViewportBuffer()
+    spacerBuffer2 = createViewportBuffer()
+    const ctx1 = spacerBuffer1.getContext('2d')
+    const ctx2 = spacerBuffer2.getContext('2d')
+    if (!ctx1 || !ctx2) throw new Error('Could not create spacer buffers')
+
+    spacerTexture1 = new THREE.CanvasTexture(spacerBuffer1)
+    spacerTexture2 = new THREE.CanvasTexture(spacerBuffer2)
+    for (const texture of [spacerTexture1, spacerTexture2]) {
+      texture.colorSpace = THREE.LinearSRGBColorSpace
+      texture.minFilter = THREE.LinearFilter
+      texture.magFilter = THREE.LinearFilter
+      texture.generateMipmaps = false
+    }
+
+    spacerFluidMaterial = new THREE.ShaderMaterial({
+      vertexShader: gymCabinVertexShader,
+      fragmentShader: cabinFishermanFragmentShader,
+      uniforms: {
+        uCabinTexture:    { value: spacerTexture1 },
+        uFishermanTexture: { value: spacerTexture2 },
+        uProgress:        { value: 0 },
+        uTime:            { value: 0 },
+        uResolution:      { value: new THREE.Vector2(1, 1) },
+        uEdgeIntensity:   { value: 0.72 },
+        uColorReveal:     { value: 1.0 },
+        uEdgeBrightness:  { value: 0.35 },
+      },
+      depthTest: false,
+      depthWrite: false,
+    })
+    spacerFluidGeometry = new THREE.PlaneGeometry(2, 2)
+    spacerFluidMesh = new THREE.Mesh(spacerFluidGeometry, spacerFluidMaterial)
+    spacerFluidScene.add(spacerFluidMesh)
+    
+    resizeSpacerFluid()
+    return true
+  } catch {
+    disposeSpacerFluid()
+    return false
+  }
+}
+
+function resizeSpacerFluid() {
+  if (!spacerFluidRenderer || !spacerFluidMaterial) return
+  const width = Math.max(window.innerWidth, 1)
+  const height = Math.max(window.innerHeight, 1)
+  spacerFluidRenderer.setPixelRatio(getFluidPixelRatio())
+  spacerFluidRenderer.setSize(width, height, false)
+  spacerFluidMaterial.uniforms.uResolution.value.set(width, height)
+
+  for (const buffer of [spacerBuffer1, spacerBuffer2]) {
+    if (!buffer || (buffer.width === width && buffer.height === height)) continue
+    buffer.width = width
+    buffer.height = height
+  }
+  updateSpacerTextures(spacerFluidPhase)
+}
+
+function updateSpacerTextures(phase: number) {
+  spacerFluidPhase = phase
+  if (!spacerBuffer1 || !spacerBuffer2 || !spacerTexture1 || !spacerTexture2) return
+  const ctx1 = spacerBuffer1.getContext('2d')
+  const ctx2 = spacerBuffer2.getContext('2d')
+  if (!ctx1 || !ctx2) return
+
+  if (phase === 1) { // Fisherman -> Spacer
+    const fisherman = fishermanFrames[FISHERMAN_TOTAL_FRAMES - 1]
+    if (fisherman?.complete && fisherman.naturalWidth) {
+      drawImageCover(ctx1, fisherman, spacerBuffer1.width, spacerBuffer1.height)
+    } else {
+      ctx1.fillStyle = '#000'
+      ctx1.fillRect(0, 0, spacerBuffer1.width, spacerBuffer1.height)
+    }
+    ctx2.fillStyle = '#f8f9fa'
+    ctx2.fillRect(0, 0, spacerBuffer2.width, spacerBuffer2.height)
+  } else if (phase === 2) { // Spacer -> Redbull
+    ctx1.fillStyle = '#f8f9fa'
+    ctx1.fillRect(0, 0, spacerBuffer1.width, spacerBuffer1.height)
+    const redbull = redbullFrames[0]
+    if (redbull?.complete && redbull.naturalWidth) {
+      drawImageCover(ctx2, redbull, spacerBuffer2.width, spacerBuffer2.height)
+    } else {
+      ctx2.fillStyle = '#000'
+      ctx2.fillRect(0, 0, spacerBuffer2.width, spacerBuffer2.height)
+    }
+  }
+
+  spacerTexture1.needsUpdate = true
+  spacerTexture2.needsUpdate = true
+}
+
+function renderSpacerFluid(time: number, progress: number, phase: number) {
+  if (!spacerFluidActive.value || !spacerFluidRenderer || !spacerFluidScene || !spacerFluidCamera || !spacerFluidMaterial) return
+  
+  if (spacerFluidPhase !== phase) {
+    updateSpacerTextures(phase)
+    spacerFluidAnimationStartTime = performance.now()
+    spacerFluidRenderedProgress = progress
+  }
+
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const smoothing = reducedMotion ? 1 : 0.075
+  spacerFluidRenderedProgress += (progress - spacerFluidRenderedProgress) * smoothing
+
+  spacerFluidMaterial.uniforms.uProgress.value = spacerFluidRenderedProgress
+  spacerFluidMaterial.uniforms.uTime.value = reducedMotion ? 0 : (time - spacerFluidAnimationStartTime) / 1000
+
+  const outlineFade = clamp01(spacerFluidRenderedProgress / 0.8)
+  if (phase === 2) {
+    // Redbull visible inside the shader via spacerTexture2
+    // Use the same edge intensity as phase 1 so it looks identical to Hero/Fisherman wave
+    spacerFluidMaterial.uniforms.uEdgeIntensity.value = 0.72 * (1 - outlineFade)
+  } else {
+    spacerFluidMaterial.uniforms.uEdgeIntensity.value = 0.72 * (1 - outlineFade)
+  }
+  spacerFluidMaterial.uniforms.uColorReveal.value = 1.0
+
+  spacerFluidRenderer.render(spacerFluidScene, spacerFluidCamera)
+}
+
+function disposeSpacerFluid() {
+  if (spacerFluidMesh && spacerFluidScene) spacerFluidScene.remove(spacerFluidMesh)
+  spacerTexture1?.dispose()
+  spacerTexture2?.dispose()
+  spacerFluidGeometry?.dispose()
+  spacerFluidMaterial?.dispose()
+  spacerFluidRenderer?.dispose()
+  spacerFluidRenderer?.forceContextLoss()
+  spacerFluidScene?.clear()
+  spacerFluidRenderer = null
+  spacerFluidScene = null
+  spacerFluidCamera = null
+  spacerFluidGeometry = null
+  spacerFluidMaterial = null
+}
+
+function updateFishermanSpacerFromScroll(progress: number) {
+  const previousProgress = fishermanSpacerProgress
+  fishermanSpacerProgress = clamp01(progress)
+  
+  if (fishermanSpacerProgress <= 0.0001) {
+    if (previousProgress > 0.0001) {
+      spacerFluidActive.value = false
+      spacerFluidRenderedProgress = 0
     }
     return
   }
 
   cabinFishermanFluidActive.value = false
+  spacerFluidActive.value = true
+
+  // Only render if we haven't scrolled into the next section
+  if (spacerProgress <= 0.0001 && spacerRedbullProgress <= 0.0001) {
+    renderSpacerFluid(performance.now(), fishermanSpacerProgress, 1)
+  }
+}
+
+function updateSpacerFromScroll(progress: number) {
+  spacerProgress = clamp01(progress)
+  if (spacerProgress <= 0.0001) return
+
+  cabinFishermanFluidActive.value = false
+  spacerFluidActive.value = true
+
+  if (spacerRedbullProgress <= 0.0001) {
+    renderSpacerFluid(performance.now(), 1.0, 1)
+  }
+}
+
+function updateSpacerRedbullFromScroll(progress: number) {
+  const previousProgress = spacerRedbullProgress
+  spacerRedbullProgress = clamp01(progress)
+
+  if (spacerRedbullProgress <= 0.0001) {
+    if (previousProgress > 0.0001) {
+      cabinTransitionActive.value = false
+      spacerFluidActive.value = true
+      // Phase 1 is at 100% when entering this
+      renderSpacerFluid(performance.now(), 1.0, 1)
+    }
+    return
+  }
+
+  // During wave: update spacerBuffer2 with current Redbull frame so it's
+  // visible inside the shader below the wipe line (Redbull moves with scroll).
+  // This allows the shader to compute the Sobel edge correctly on the Redbull frame.
+  if (spacerBuffer2 && spacerTexture2) {
+    const waveScrollRatio = spacerRedbullScrollDistance / Math.max(1, spacerRedbullScrollDistance + redbullScrollDistance)
+    const redbullFrameProgress = spacerRedbullProgress * waveScrollRatio
+    const frameIndex = Math.round(clamp01(redbullFrameProgress) * (REDBULL_TOTAL_FRAMES - 1))
+    
+    let image = redbullFrames[frameIndex]
+    if (!image?.complete || !image.naturalWidth) {
+      void loadRedbullFrame(frameIndex)
+      image = findNearestLoadedFrame(redbullFrames, frameIndex)
+    }
+    
+    const ctx2 = spacerBuffer2.getContext('2d')
+    if (ctx2 && image) {
+      drawImageCover(ctx2, image, spacerBuffer2.width, spacerBuffer2.height)
+      spacerTexture2.needsUpdate = true
+    }
+  }
+
+  spacerFluidActive.value = true
+  cabinTransitionActive.value = false
+  // Note: renderSpacerFluid is now handled automatically in the tick() RAF loop.
+  // We still call it here synchronously just in case it lags by one frame.
+  renderSpacerFluid(performance.now(), spacerRedbullProgress, 2)
+}
+
+function updateRedbullFromScroll(progress: number) {
+  const previousProgress = redbullSequenceProgress
+  redbullSequenceProgress = clamp01(progress)
+
+  if (redbullSequenceProgress <= 0.0001) {
+    if (previousProgress > 0.0001 && spacerRedbullProgress >= 0.999) {
+      cabinTransitionActive.value = false
+      spacerFluidActive.value = true
+      renderSpacerFluid(performance.now(), 1.0, 2)
+    }
+    return
+  }
+
+  // Continue seamlessly from where wave left off
+  const waveScrollRatio = spacerRedbullScrollDistance / Math.max(1, spacerRedbullScrollDistance + redbullScrollDistance)
+  const effectiveProgress = waveScrollRatio + redbullSequenceProgress * (1.0 - waveScrollRatio)
+  spacerFluidActive.value = false
   cabinTransitionActive.value = true
-  renderRedbullSequence(redbullSequenceProgress)
+  renderRedbullSequence(effectiveProgress)
 }
 
 // ── Setup scroll ──────────────────────────────────────────────────────────
@@ -1610,6 +1968,9 @@ function setupScroll() {
     ),
     window.innerHeight * 2.8,
   )
+  fishermanSpacerScrollDistance = window.innerHeight * 1.5
+  spacerScrollDistance = window.innerHeight
+  spacerRedbullScrollDistance = window.innerHeight * 1.5
   redbullScrollDistance = REDBULL_TOTAL_FRAMES * REDBULL_SCROLL_PX_PER_FRAME
   wingsuitScrollDistance = Math.max(1400, window.innerHeight * 1.8)
   updateStoryScrollHeight()
@@ -1666,8 +2027,23 @@ function setupScroll() {
       : 0
     updateFishermanFromScroll(fishermanProgress)
 
+    const fSpacerProgress = fishermanScrollUnlocked.value
+      ? (scroll - cabinScrollStart - cabinScrollDistance - fishermanScrollDistance) / Math.max(1, fishermanSpacerScrollDistance)
+      : 0
+    updateFishermanSpacerFromScroll(fSpacerProgress)
+
+    const spacerScrollProg = fishermanScrollUnlocked.value
+      ? (scroll - cabinScrollStart - cabinScrollDistance - fishermanScrollDistance - fishermanSpacerScrollDistance) / Math.max(1, spacerScrollDistance)
+      : 0
+    updateSpacerFromScroll(spacerScrollProg)
+
+    const sRedbullProgress = fishermanScrollUnlocked.value
+      ? (scroll - cabinScrollStart - cabinScrollDistance - fishermanScrollDistance - fishermanSpacerScrollDistance - spacerScrollDistance) / Math.max(1, spacerRedbullScrollDistance)
+      : 0
+    updateSpacerRedbullFromScroll(sRedbullProgress)
+
     const redbullProgress = fishermanScrollUnlocked.value
-      ? (scroll - cabinScrollStart - cabinScrollDistance - fishermanScrollDistance) / Math.max(1, redbullScrollDistance)
+      ? (scroll - cabinScrollStart - cabinScrollDistance - fishermanScrollDistance - fishermanSpacerScrollDistance - spacerScrollDistance - spacerRedbullScrollDistance) / Math.max(1, redbullScrollDistance)
       : 0
     updateRedbullFromScroll(redbullProgress)
 
@@ -1677,6 +2053,9 @@ function setupScroll() {
           - cabinScrollStart
           - cabinScrollDistance
           - fishermanScrollDistance
+          - fishermanSpacerScrollDistance
+          - spacerScrollDistance
+          - spacerRedbullScrollDistance
           - redbullScrollDistance
         ) / Math.max(1, wingsuitScrollDistance)
       : 0
@@ -1705,6 +2084,7 @@ onMounted(async () => {
     Promise.all([preloadFrames(), loadGymFrame(0), loadFishermanFrame(0)]),
     preloadCabinTransitionAsset(),
     initGymCabinFluid(),
+    initSpacerFluid(),
   ])
   cabinScrollUnlocked.value = cabinReady
   isLoading.value = false
@@ -1733,6 +2113,7 @@ onUnmounted(() => {
   cabinTransitionAssetPromise = null
   disposeGymCabinFluid()
   disposeCabinFishermanFluid()
+  disposeSpacerFluid()
   gymPreloadCancelled = true
   fishermanPreloadCancelled = true
   redbullPreloadCancelled = true
@@ -1810,6 +2191,7 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
+.spacer-fluid-canvas,
 .cabin-fisherman-fluid-canvas {
   position: fixed;
   inset: 0;
@@ -1834,6 +2216,44 @@ onUnmounted(() => {
 .embedded-cabin-scene.is-interactive {
   pointer-events: auto;
 }
+
+.cabin-replay-btn {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  padding: 0.55rem 1.4rem;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.88);
+  font: 500 0.72rem/1 'Inter', sans-serif;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.cabin-replay-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #fff;
+}
+
+.replay-fade-enter-active,
+.replay-fade-leave-active {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.replay-fade-enter-from,
+.replay-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
+}
+
 
 .scroll-container {
   position: relative;
