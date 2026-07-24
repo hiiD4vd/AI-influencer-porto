@@ -7,12 +7,7 @@
     }"
     ref="viewRoot"
   >
-    <!-- Navigation -->
-    <nav class="shared-nav">
-      <RouterLink to="/showcase" class="nav-link" :class="{ active: $route.name === 'showcase' || $route.name === 'showcase-root' }">Showcase</RouterLink>
-      <RouterLink to="/vibe" class="nav-link" :class="{ active: $route.name === 'vibe' }">Vibe</RouterLink>
-      <RouterLink to="/transition-test" class="nav-link" :class="{ active: $route.name === 'transition-test' }">FX</RouterLink>
-    </nav>
+
 
     <!-- Canvas — always visible until fully replaced -->
     <canvas ref="canvasEl" class="hero-canvas"></canvas>
@@ -79,7 +74,7 @@
       :class="{ 'is-interactive': cabinSceneActive }"
       :aria-hidden="!showCabinScene"
     >
-      <CabinTestView
+      <CabinSection
         embedded
         :active="cabinSceneActive"
         :paused="!showCabinScene || fishermanTransitionProgress > 0"
@@ -165,14 +160,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef, onMounted, onUnmounted } from 'vue'
+import { ref, shallowRef, onMounted, onUnmounted, watch } from 'vue'
 import Lenis from 'lenis'
 import gsap from 'gsap'
 import * as THREE from 'three'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
-import CabinTestView from './CabinTestView.vue'
+
 import ScratchTransitionTestView from './ScratchTransitionTestView.vue'
 import WingsuitFlightSection from '../components/WingsuitFlightSection.vue'
+import CabinSection from '../components/CabinSection.vue'
 
 gsap.registerPlugin(ScrollTrigger)
 
@@ -257,6 +253,15 @@ const fishermanScrollUnlocked = ref(false)
 const cabinEverCompleted = ref(false)
 const wingsuitSectionProgress = ref(0)
 const fluidHeroActive = ref(true)
+
+watch(fluidHeroActive, (isActive) => {
+  if (isActive) document.body.classList.add('vibe-fluid-active')
+  else document.body.classList.remove('vibe-fluid-active')
+}, { immediate: true })
+
+onUnmounted(() => {
+  document.body.classList.remove('vibe-fluid-active')
+})
 const introTransitionMarker = ref<HTMLElement | null>(null)
 const preparedCabinChime = shallowRef<HTMLAudioElement | null>(null)
 const preparedCabinAnnouncement = shallowRef<HTMLAudioElement | null>(null)
@@ -524,7 +529,7 @@ const cabinFishermanFragmentShader = /* glsl */ `
     float edgeDistance = abs(vUv.y - sectionFront);
 
     // ── Sparkle zone around the wipe edge ──
-    float edgeZoneWidth = 0.072 * (1.0 - uProgress) + 0.022;
+    float edgeZoneWidth = 0.02 * (1.0 - uProgress) + 0.005;
     float edgeZone = 1.0 - smoothstep(edgeZoneWidth * 0.2, edgeZoneWidth, edgeDistance);
     vec2 sparkleCell = floor(vUv * uResolution / 1.25);
     float sparkleSeed = hash(sparkleCell);
@@ -535,14 +540,14 @@ const cabinFishermanFragmentShader = /* glsl */ `
     // ── Luminous contour exactly on the wipe boundary ──
     float contourCell = hash(vec2(floor(gl_FragCoord.x / 1.5), 19.0));
     float contourPulse = 0.92 + 0.08 * sin(uTime * 1.35 + floor(gl_FragCoord.x / 1.5) * 0.17);
-    float contourCoreWidth = mix(0.0035, 0.0065, contourCell);
-    float contourCore = 1.0 - smoothstep(contourCoreWidth, contourCoreWidth + 0.0045, edgeDistance);
-    float contourHalo = 1.0 - smoothstep(0.004, 0.020, edgeDistance);
+    float contourCoreWidth = mix(0.0015, 0.0025, contourCell);
+    float contourCore = 1.0 - smoothstep(contourCoreWidth, contourCoreWidth + 0.002, edgeDistance);
+    float contourHalo = 1.0 - smoothstep(0.002, 0.008, edgeDistance);
     float offsetSparkleSeed = hash(floor((vUv * uResolution + vec2(1.0, 3.0)) / 1.75) + 31.7);
     float thirdSparkleSeed  = hash(floor((vUv * uResolution + vec2(3.0, 1.0)) / 2.25) + 73.1);
     float denseSparkleSeed  = max(sparkleSeed, max(offsetSparkleSeed * 0.96, thirdSparkleSeed * 0.92));
     float contourDust = smoothstep(0.16, 0.52, denseSparkleSeed) * (
-      1.0 - smoothstep(0.012, 0.040, edgeDistance)
+      1.0 - smoothstep(0.005, 0.015, edgeDistance)
     );
     float contourLight = (
       contourCore * 1.85
@@ -1812,6 +1817,17 @@ function renderSpacerFluid(time: number, progress: number, phase: number) {
   const smoothing = reducedMotion ? 1 : 0.075
   spacerFluidRenderedProgress += (progress - spacerFluidRenderedProgress) * smoothing
 
+  if (phase === 1 && spacerBuffer1 && spacerTexture1) {
+    // Animate fisherman sequence in reverse based on the fluid progress
+    const reverseIndex = Math.floor((1 - clamp01(spacerFluidRenderedProgress)) * (FISHERMAN_TOTAL_FRAMES - 1))
+    const fisherman = fishermanFrames[Math.max(0, Math.min(FISHERMAN_TOTAL_FRAMES - 1, reverseIndex))]
+    const ctx1 = spacerBuffer1.getContext('2d')
+    if (ctx1 && fisherman?.complete && fisherman.naturalWidth) {
+      drawImageCover(ctx1, fisherman, spacerBuffer1.width, spacerBuffer1.height)
+      spacerTexture1.needsUpdate = true
+    }
+  }
+
   spacerFluidMaterial.uniforms.uProgress.value = spacerFluidRenderedProgress
   spacerFluidMaterial.uniforms.uTime.value = reducedMotion ? 0 : (time - spacerFluidAnimationStartTime) / 1000
 
@@ -2152,17 +2168,17 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.vibe-view.is-fluid-hero-active .shared-nav {
+:global(body.vibe-fluid-active .shared-nav) {
   background: rgba(255, 255, 255, 0.7);
   border-color: rgba(46, 46, 46, 0.14);
   box-shadow: 0 8px 28px rgba(46, 46, 46, 0.08);
 }
 
-.vibe-view.is-fluid-hero-active .nav-link {
+:global(body.vibe-fluid-active .nav-link) {
   color: rgba(46, 46, 46, 0.58);
 }
 
-.vibe-view.is-fluid-hero-active .nav-link:hover:not(.active) {
+:global(body.vibe-fluid-active .nav-link:hover:not(.active)) {
   color: #2e2e2e;
   background: rgba(46, 46, 46, 0.08);
 }
